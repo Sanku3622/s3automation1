@@ -1,1 +1,4 @@
 InvalidParameterCombination: Cannot find version 19.0 for oracle-se2
+
+
+aws rds describe-db-engine-versions --engine oracle-se2 --query 'DBEngineVersions[*].EngineVersion' --region us-east-1

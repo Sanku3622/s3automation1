@@ -1,0 +1,107 @@
+provider "aws" {
+
+  region = "us-east-1" # Replace with your desired region
+
+}
+
+# Define variables for your PostgreSQL configurations
+
+variable "db_password" {
+
+  description = "Password for the PostgreSQL database"
+
+  type        = string
+
+}
+
+resource "aws_db_parameter_group" "sank_db" {
+  name   = "my-pg"
+  family = "postgres11"
+
+}
+
+
+# Create a primary PostgreSQL instance
+
+resource "aws_db_instance" "primary_db" {
+
+  allocated_storage    = 20
+
+  storage_type         = "gp2"
+
+  engine               = "postgres"
+
+  engine_version       = "11.17"
+
+  instance_class       = "db.t2.micro"
+
+  username             = "db_user"
+
+  password             = var.db_password
+
+  skip_final_snapshot  = true # Prevents a final snapshot when the instance is destroyed
+
+
+  # Create a parameter group with enable_read_replica parameter
+
+  parameter_group_name = aws_db_parameter_group.sank_db.name
+  apply_immediately    = true
+
+
+tags = {
+
+     Name = "sank-db"
+
+   }
+
+}
+
+
+# Create a read replica of the primary PostgreSQL instance
+
+resource "aws_db_instance" "replica_db" {
+
+  count              = 2  # You can adjust the number of replicas as needed
+
+  allocated_storage  = 20
+
+  storage_type       = "gp2"
+
+  engine             = "postgres"
+
+  engine_version     = "11.17"
+
+  instance_class     = "db.t2.micro"
+
+  username           = "db_user"
+
+  password           = var.db_password
+
+  skip_final_snapshot = true # Prevents a final snapshot when the instance is destroyed
+
+
+  # Use the same parameter group with enable_read_replica parameter
+
+  parameter_group_name = aws_db_instance.primary_db.parameter_group_name
+
+
+tags = {
+
+  Name = "sank-db-${count.index}"
+
+       }
+}
+
+# Define outputs to capture important information
+
+output "primary_db_endpoint" {
+
+  value = aws_db_instance.primary_db.endpoint
+
+}
+
+output "replica_db_endpoints" {
+
+  value = [for db in aws_db_instance.replica_db : db.endpoint]
+
+}

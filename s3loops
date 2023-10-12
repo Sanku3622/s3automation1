@@ -1,0 +1,61 @@
+variable "bucket_prefix" {
+
+  default = "sank-test123456"
+
+}
+
+# Create S3 buckets in us-east-1
+
+provider "aws" {
+
+  alias  = "us-east-1"
+
+  region = "us-east-1"
+
+}
+
+# Create S3 buckets in us-west-1
+
+provider "aws" {
+
+  alias  = "us-west-1"
+
+  region = "us-west-1"
+
+}
+
+# Create 25 S3 buckets in us-east-1
+
+resource "aws_s3_bucket" "sank-test123456" {
+
+  count         = 2
+
+  provider      = aws.us-east-1
+
+  bucket        = "${var.bucket_prefix}-${count.index + 1}"
+
+  acl           = "private"
+
+  force_destroy = true
+
+  # Add more bucket configurations as needed
+
+}
+
+# Create 25 S3 buckets in us-west-1
+
+resource "aws_s3_bucket" "sank-test1234567" {
+
+  count         = 2
+
+  provider      = aws.us-west-1
+
+  bucket        = "${var.bucket_prefix}-${count.index + 1}"  # Start from 26 to avoid name conflicts
+
+  acl           = "private"
+
+  force_destroy = true
+
+  # Add more bucket configurations as neede'd
+
+}

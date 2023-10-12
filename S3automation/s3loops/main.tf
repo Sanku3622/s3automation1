@@ -1,44 +1,64 @@
+variable "bucket_prefix" {
+
+  default = "sankethcl1234"
+
+}
+
+# Create S3 buckets in us-east-1
+
 provider "aws" {
 
-  alias = "us_east"
+  alias  = "us-east-1"
+
   region = "us-east-1"
+
 }
+
+
+# Create S3 buckets in us-west-1
 
 provider "aws" {
 
-  alias = "us-west"
-  region = "us-west-2"
+  alias  = "us-west-1"
 
-}
-
-provider "aws" {
-
-  alias = "eu-west-1"
-  region = "eu-west-1"
-
-}
-
-variable "regions" {
-
-  type    = list(string)
-
-  default = ["us-east-1", "us-west-2", "eu-west-1"]
+  region = "us-west-1"
 
 }
 
 
-resource "aws_s3_bucket" "example" {
 
-  for_each = toset(var.regions)
+# Create 25 S3 buckets in us-east-1
 
+ resource "aws_s3_bucket" "sankethcl1234_us_east_1" {
 
+  count         = 2
 
-  bucket = "sank-bucket-${each.value}"
+  provider      = aws.us-east-1
 
-  acl    = "private"
+  bucket        = "${var.bucket_prefix}-us-east-1-${count.index + 1}"
 
+  acl           = "private"
 
+ # force_destroy = true
 
-  # You can add other bucket configurations here
+  # Add more bucket configurations as needed
+
+}
+
+# Create 25 S3 buckets in us-west-1
+
+resource "aws_s3_bucket" "sankethcl1234_us_west_1" {
+
+  count         = 2
+
+  provider      = aws.us-west-1
+
+  bucket        = "${var.bucket_prefix}-us-west-1-${count.index + 1}"
+
+  acl           = "private"
+
+#  force_destroy = true
+
+  # Add more bucket configurations as needed
 
 }

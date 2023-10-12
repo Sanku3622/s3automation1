@@ -1,4 +1,29 @@
-InvalidParameterCombination: Cannot find version 19.0 for oracle-se2
-
-
-aws rds describe-db-engine-versions --engine oracle-se2 --query 'DBEngineVersions[*].EngineVersion' --region us-east-1
+ Error: putting S3 Bucket (sankethcl1234-us-east-1-2) Policy: operation error S3: PutBucketPolicy, https response error StatusCode: 301, RequestID: DNG0HE3RABQTZNJ6, HostID: mmJps0saH/1+HskYQPtwXG71ofDOUSXm95JKy4dZY5IpDpI5xuFFO3L1jU+NuyMJ49THk5rPkUs=, api error PermanentRedirect: The bucket you are attempting to access must be addressed using the specified endpoint. Please send all future requests to this endpoint.
+│
+│   with aws_s3_bucket_policy.sankethcl1234_us_east_1[1],
+│   on main.tf line 49, in resource "aws_s3_bucket_policy" "sankethcl1234_us_east_1":
+│   49: resource "aws_s3_bucket_policy" "sankethcl1234_us_east_1" {
+│
+╵
+╷
+│ Error: putting S3 Bucket (sankethcl1234-us-east-1-1) Policy: operation error S3: PutBucketPolicy, https response error StatusCode: 301, RequestID: DNG5Z9NBPMXZAHEH, HostID: TVe1g0aYuuDF/6cT/KC/iGJOmwnDvsLdjkRhte6AwpHdqzewWsV/MUVed+B/Z0wohPXTnOlLp8I=, api error PermanentRedirect: The bucket you are attempting to access must be addressed using the specified endpoint. Please send all future requests to this endpoint.
+│
+│   with aws_s3_bucket_policy.sankethcl1234_us_east_1[0],
+│   on main.tf line 49, in resource "aws_s3_bucket_policy" "sankethcl1234_us_east_1":
+│   49: resource "aws_s3_bucket_policy" "sankethcl1234_us_east_1" {
+│
+╵
+╷
+│ Error: putting S3 Bucket (sankethcl1234-us-west-1-2) Policy: operation error S3: PutBucketPolicy, https response error StatusCode: 301, RequestID: G4B8RZYRDH20298A, HostID: bDgPRXI49MSxEdesSpIBueXVnvV1LHD5guBm+H3vi1wwJNgtOjrZEGiFjAgofJFlWQO5UUn4YfM=, api error PermanentRedirect: The bucket you are attempting to access must be addressed using the specified endpoint. Please send all future requests to this endpoint.
+│
+│   with aws_s3_bucket_policy.sankethcl1234_us_west_1[1],
+│   on main.tf line 77, in resource "aws_s3_bucket_policy" "sankethcl1234_us_west_1":
+│   77: resource "aws_s3_bucket_policy" "sankethcl1234_us_west_1" {
+│
+╵
+╷
+│ Error: putting S3 Bucket (sankethcl1234-us-west-1-1) Policy: operation error S3: PutBucketPolicy, https response error StatusCode: 301, RequestID: G4BC4QJP0YQ6NPHS, HostID: HSHXHl4p3Has2DEC0GoQpzecRjMdUhd//9FpdFiyq1oT+FnOEeyvIvKXcg8GJlTj2TsDG781tEM=, api error PermanentRedirect: The bucket you are attempting to access must be addressed using the specified endpoint. Please send all future requests to this endpoint.
+│
+│   with aws_s3_bucket_policy.sankethcl1234_us_west_1[0],
+│   on main.tf line 77, in resource "aws_s3_bucket_policy" "sankethcl1234_us_west_1":
+│   77: resource "aws_s3_bucket_policy" "sankethcl1234_us_west_1" {

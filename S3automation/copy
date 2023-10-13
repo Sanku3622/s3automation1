@@ -1,29 +1,98 @@
- Error: putting S3 Bucket (sankethcl1234-us-east-1-2) Policy: operation error S3: PutBucketPolicy, https response error StatusCode: 301, RequestID: DNG0HE3RABQTZNJ6, HostID: mmJps0saH/1+HskYQPtwXG71ofDOUSXm95JKy4dZY5IpDpI5xuFFO3L1jU+NuyMJ49THk5rPkUs=, api error PermanentRedirect: The bucket you are attempting to access must be addressed using the specified endpoint. Please send all future requests to this endpoint.
+I am creating oracle rds db instance and cross region replica (using terraform main.tf) for the same but i am getting below error while applying the script; it seems in subnet resource froup something went wrong, please help me to resolve below error. I have called subnet group in main instance block and same in replica block also but still getting below error please help me to resolve this error
+
+╷
+│ Error: creating RDS DB Subnet Group (sank): InvalidParameterValue: Some input subnets in :[subnet- 
+  023e4c0e518c1db07, subnet-0f7b2a6481f8aeb9e] are invalid.
+│       status code: 400, request id: 864eeebd-ad79-4362-963b-d47ad50fc9e2
 │
-│   with aws_s3_bucket_policy.sankethcl1234_us_east_1[1],
-│   on main.tf line 49, in resource "aws_s3_bucket_policy" "sankethcl1234_us_east_1":
-│   49: resource "aws_s3_bucket_policy" "sankethcl1234_us_east_1" {
+│   with aws_db_subnet_group.sank,
+│   on main1.tf line 6, in resource "aws_db_subnet_group" "sank":
+│    6: resource "aws_db_subnet_group" "sank" {
 │
 ╵
 ╷
-│ Error: putting S3 Bucket (sankethcl1234-us-east-1-1) Policy: operation error S3: PutBucketPolicy, https response error StatusCode: 301, RequestID: DNG5Z9NBPMXZAHEH, HostID: TVe1g0aYuuDF/6cT/KC/iGJOmwnDvsLdjkRhte6AwpHdqzewWsV/MUVed+B/Z0wohPXTnOlLp8I=, api error PermanentRedirect: The bucket you are attempting to access must be addressed using the specified endpoint. Please send all future requests to this endpoint.
+│ Error: creating RDS DB Subnet Group (sank1): InvalidParameterValue: Some input subnets in :    
+  [subnet-03acb5d6d1071d2c5, subnet-05c2bdeaeea13d741] are invalid.
+│       status code: 400, request id: 457fa973-b4c3-4776-b003-dc0de397105f
 │
-│   with aws_s3_bucket_policy.sankethcl1234_us_east_1[0],
-│   on main.tf line 49, in resource "aws_s3_bucket_policy" "sankethcl1234_us_east_1":
-│   49: resource "aws_s3_bucket_policy" "sankethcl1234_us_east_1" {
+│   with aws_db_subnet_group.sank1,
+│   on main1.tf line 41, in resource "aws_db_subnet_group" "sank1":
+│   41: resource "aws_db_subnet_group" "sank1" {
 │
-╵
-╷
-│ Error: putting S3 Bucket (sankethcl1234-us-west-1-2) Policy: operation error S3: PutBucketPolicy, https response error StatusCode: 301, RequestID: G4B8RZYRDH20298A, HostID: bDgPRXI49MSxEdesSpIBueXVnvV1LHD5guBm+H3vi1wwJNgtOjrZEGiFjAgofJFlWQO5UUn4YfM=, api error PermanentRedirect: The bucket you are attempting to access must be addressed using the specified endpoint. Please send all future requests to this endpoint.
-│
-│   with aws_s3_bucket_policy.sankethcl1234_us_west_1[1],
-│   on main.tf line 77, in resource "aws_s3_bucket_policy" "sankethcl1234_us_west_1":
-│   77: resource "aws_s3_bucket_policy" "sankethcl1234_us_west_1" {
-│
-╵
-╷
-│ Error: putting S3 Bucket (sankethcl1234-us-west-1-1) Policy: operation error S3: PutBucketPolicy, https response error StatusCode: 301, RequestID: G4BC4QJP0YQ6NPHS, HostID: HSHXHl4p3Has2DEC0GoQpzecRjMdUhd//9FpdFiyq1oT+FnOEeyvIvKXcg8GJlTj2TsDG781tEM=, api error PermanentRedirect: The bucket you are attempting to access must be addressed using the specified endpoint. Please send all future requests to this endpoint.
-│
-│   with aws_s3_bucket_policy.sankethcl1234_us_west_1[0],
-│   on main.tf line 77, in resource "aws_s3_bucket_policy" "sankethcl1234_us_west_1":
-│   77: resource "aws_s3_bucket_policy" "sankethcl1234_us_west_1" {
+
+
+
+#terraform main.tf#
+
+#
+provider "aws" {
+  alias = "us-east-1"
+  region = "us-east-1"
+}
+
+resource "aws_db_subnet_group" "sank" {
+  name       = "sank"
+  subnet_ids = ["subnet-023e4c0e518c1db07", "subnet-0f7b2a6481f8aeb9e"]
+
+  tags = {
+    Name = "Sank"
+  }
+}
+
+resource "aws_db_instance" "primary" {
+  allocated_storage    = 100
+  storage_type         = "gp2"
+  engine               = "oracle-ee"
+engine_version = "19.0.0.0.ru-2023-07.rur-2023-07.r1"
+  instance_class       = "db.m4.large"
+  username             = "dbadmin"
+  password             = "yourpassword"
+
+parameter_group_name = "default.oracle-19"
+ db_subnet_group_name    = aws_db_subnet_group.sank.name
+  vpc_security_group_ids = ["sg-0afeaf6497b1f3364"]
+license_model        = "bring-your-own-license"
+  multi_az = true
+
+  tags = {
+    Name = "oracle-db-primary"
+  }
+
+}
+
+provider "aws" {
+  alias  = "us-west-1"
+  region = "us-west-1"
+}
+ 
+resource "aws_db_subnet_group" "sank1" {
+  name       = "sank1"
+  subnet_ids = ["subnet-03acb5d6d1071d2c5", "subnet-05c2bdeaeea13d741"]
+
+  tags = {
+    Name = "Sank1"
+  }
+}
+
+resource "aws_db_instance" "default" {
+provider = aws.us-west-1
+  allocated_storage    = 100
+  storage_type         = "gp2"
+  engine               = "oracle-ee"
+engine_version = "19.0.0.0.ru-2023-07.rur-2023-07.r1"
+  instance_class       = "db.m4.large"
+  username             = "dbadmin"
+  password             = "yourpassword"
+
+parameter_group_name     = "default.oracle-19"
+ db_subnet_group_name     = aws_db_subnet_group.sank1.name
+  vpc_security_group_ids = ["sg-034dc2c037d48ebbc"]
+license_model        = "bring-your-own-license"
+  multi_az = true
+
+  tags = {
+    Name = "oracle-db-replica-cross-region"
+  }
+
+}
+#

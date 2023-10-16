@@ -12,3 +12,78 @@ Error: Unsupported argument
 │   74:   source_db_instance_identifier = aws_db_instance.main.identifier
 │
 │ An argument named "source_db_instance_identifier" is not expected here.
+
+
+
+provider "aws" {
+  region     = "us-east-1"
+}
+ 
+resource "aws_db_instance" "main" {
+
+  identifier             = "my-oracle-instance"
+  allocated_storage      = 100
+  storage_type           = "gp2"
+  engine                 = "oracle-ee"
+engine_version = "19.0.0.0.ru-2021-07.rur-2021-07.r1"
+  instance_class         = "db.m5.large"
+  username               = "admin"
+  password               = "MyPassword123" # Replace with your secure password
+  publicly_accessible    = false
+  skip_final_snapshot    = true
+  vpc_security_group_ids = ["sg-0afeaf6497b1f3364"]
+parameter_group_name = "default.oracle-ee-19.0"
+
+tags = {
+  Name = "mydb"
+}
+
+}
+
+resource "aws_db_instance" "replica" {
+
+  for_each               = { replica1 = 1 }  # You can adjust the count or add more replicas as needed
+  identifier             = "my-oracle-replica-${each.key}"
+  source_db_instance_identifier = aws_db_instance.main.identifier
+  engine                 = "oracle-ee"
+engine_version = "19.0.0.0.ru-2021-07.rur-2021-07.r1"
+  instance_class         = "db.m5.large"
+  username               = "admin"
+  password               = "MyPassword123" # Replace with your secure password
+  publicly_accessible    = false
+  skip_final_snapshot    = true
+  vpc_security_group_ids = ["sg-0afeaf6497b1f3364"]
+parameter_group_name = "default.oracle-ee-19.0"
+
+tags = {
+  Name = "mydb-replica-${each.key}"
+}
+}
+
+# Define the provider for us-west-1 region
+
+provider "aws" {
+  alias      = "us_west"
+  region     = "us-west-1"
+}
+
+resource "aws_db_instance" "replica_us_west" {
+
+  provider               = aws.us_west
+  for_each               = { replica1 = 1 }  # Adjust count or add more replicas as needed
+  identifier             = "my-oracle-replica-us-west-${each.key}"
+  source_db_instance_identifier = aws_db_instance.main.identifier
+  engine                 = "oracle-ee"
+engine_version = "19.0.0.0.ru-2021-07.rur-2021-07.r1"
+  instance_class         = "db.m5.large"
+  username               = "admin"
+  password               = "MyPassword123" # Replace with your secure password
+  publicly_accessible    = false
+  skip_final_snapshot    = true
+  vpc_security_group_ids = ["sg-034dc2c037d48ebbc"]
+parameter_group_name = "default.oracle-ee-19.0"
+
+tags = {
+  Name = "mydb-replica-us-west-${each.key}"
+}
+}

@@ -1,89 +1,96 @@
-Error: Unsupported argument
-│
-│   on main.tf line 37, in resource "aws_db_instance" "replica":
-│   37:   source_db_instance_identifier = aws_db_instance.main.identifier
-│
-│ An argument named "source_db_instance_identifier" is not expected here.
-╵
-╷
-│ Error: Unsupported argument
-│
-│   on main.tf line 74, in resource "aws_db_instance" "replica_us_west":
-│   74:   source_db_instance_identifier = aws_db_instance.main.identifier
-│
-│ An argument named "source_db_instance_identifier" is not expected here.
+#!/bin/sh
+WORKSPACE=${CI_PROJECT_DIR}
+cd $WORKSPACE
 
+source $WORKSPACE/config/${env}-config.properties
 
+aws_profile=profile
+profile=${!aws_profile}
 
-provider "aws" {
-  region     = "us-east-1"
-}
- 
-resource "aws_db_instance" "main" {
+aws_region=region
+region=${!aws_region}
 
-  identifier             = "my-oracle-instance"
-  allocated_storage      = 100
-  storage_type           = "gp2"
-  engine                 = "oracle-ee"
-engine_version = "19.0.0.0.ru-2021-07.rur-2021-07.r1"
-  instance_class         = "db.m5.large"
-  username               = "admin"
-  password               = "MyPassword123" # Replace with your secure password
-  publicly_accessible    = false
-  skip_final_snapshot    = true
-  vpc_security_group_ids = ["sg-0afeaf6497b1f3364"]
-parameter_group_name = "default.oracle-ee-19.0"
+result_file=$1
+status_file=$2
+error_flag="false"
 
-tags = {
-  Name = "mydb"
-}
+if [[ -f "$result_file" ]]; then
+   rm -rf "$result_file"
+fi
 
-}
+if [[ -f "$status_file" ]]; then
+   rm -rf "$status_file"
+fi
 
-resource "aws_db_instance" "replica" {
+if [[ $profile == "" ]]; then
+    echo "Add AWS profile details in awsprofiledetails for $env"
+    exit 1;
+else        
+    echo "AWS PROFILE: $profile"
+fi
 
-  for_each               = { replica1 = 1 }  # You can adjust the count or add more replicas as needed
-  identifier             = "my-oracle-replica-${each.key}"
-  source_db_instance_identifier = aws_db_instance.main.identifier
-  engine                 = "oracle-ee"
-engine_version = "19.0.0.0.ru-2021-07.rur-2021-07.r1"
-  instance_class         = "db.m5.large"
-  username               = "admin"
-  password               = "MyPassword123" # Replace with your secure password
-  publicly_accessible    = false
-  skip_final_snapshot    = true
-  vpc_security_group_ids = ["sg-0afeaf6497b1f3364"]
-parameter_group_name = "default.oracle-ee-19.0"
+# switching AWS profile
+echo "AWS Region: $region"
+export AWS_PROFILE=$profile
 
-tags = {
-  Name = "mydb-replica-${each.key}"
-}
-}
+ReplicationTaskIdentifier=$(aws --region $region dms describe-replication-tasks --filters "Name=replication-task-arn,Values=$replication_task_arn" --query "ReplicationTasks[0].ReplicationTaskIdentifier")
+echo "DMS Task Name : $ReplicationTaskIdentifier"
 
-# Define the provider for us-west-1 region
+SourceEndpointArn=$(aws --region $region dms describe-replication-tasks --filters "Name=replication-task-arn,Values=$replication_task_arn" --query "ReplicationTasks[0].SourceEndpointArn")
+SourceEndpointURL=$(aws --region $region dms describe-endpoints --filters "Name=endpoint-arn,Values=$SourceEndpointArn" --query "Endpoints[0].ServerName")
+echo "Source DB Enpoint URL : $SourceEndpointURL"
 
-provider "aws" {
-  alias      = "us_west"
-  region     = "us-west-1"
-}
+TargetEndpointArn=$(aws --region $region dms describe-replication-tasks --filters "Name=replication-task-arn,Values=$replication_task_arn" --query "ReplicationTasks[0].TargetEndpointArn")
+TargetEndpointURL=$(aws --region $region dms describe-endpoints --filters "Name=endpoint-arn,Values=$TargetEndpointArn" --query "Endpoints[0].ServerName")
+echo "Target DB Enpoint URL : $TargetEndpointURL"
 
-resource "aws_db_instance" "replica_us_west" {
+# start DMS task
+echo "Starting DMS task"
+check_task_status=$(aws --region $region dms describe-replication-tasks --filters "Name=replication-task-arn,Values=$replication_task_arn" --query "ReplicationTasks[0].Status")
+if [ "${check_task_status}" != '"running"' ]; then
+    aws dms start-replication-task --replication-task-arn $replication_task_arn --start-replication-task-type reload-target
+else
+    echo "Task is already running!!"
+    exit 1
+fi
 
-  provider               = aws.us_west
-  for_each               = { replica1 = 1 }  # Adjust count or add more replicas as needed
-  identifier             = "my-oracle-replica-us-west-${each.key}"
-  source_db_instance_identifier = aws_db_instance.main.identifier
-  engine                 = "oracle-ee"
-engine_version = "19.0.0.0.ru-2021-07.rur-2021-07.r1"
-  instance_class         = "db.m5.large"
-  username               = "admin"
-  password               = "MyPassword123" # Replace with your secure password
-  publicly_accessible    = false
-  skip_final_snapshot    = true
-  vpc_security_group_ids = ["sg-034dc2c037d48ebbc"]
-parameter_group_name = "default.oracle-ee-19.0"
+if [ $? -eq 0 ]; then
 
-tags = {
-  Name = "mydb-replica-us-west-${each.key}"
-}
-}
+    while [ "${task_status}" != '"running"' ] && [ "${task_status}" != '"failed"' ]
+    do
+        echo "Checking status of DMS task"
+        task_status=$(aws --region $region dms describe-replication-tasks --filters "Name=replication-task-arn,Values=$replication_task_arn" --query "ReplicationTasks[0].Status")
+        echo "task status: $task_status"
+		sleep 15
+    done
+    if [ "$task_status" = '"running"' ]; then
+	   echo "DMS Task started successfully."
+
+	   echo "Waiting for replication-task to get completed"
+	   while [ "${rep_task_status}" != '"stopped"' ]
+       do       
+          rep_task_status=$(aws --region $region dms describe-replication-tasks --filters "Name=replication-task-arn,Values=$replication_task_arn" --query "ReplicationTasks[0].Status")
+          echo "replication task status: $rep_task_status"
+		  sleep 15
+       done
+	   
+	   #aws dms wait replication-task-stopped --filters Name="replication-task-arn",Values="$replication_task_arn"
+	   echo "DMS Task completed successfully."
+	   echo "DMS Task completed successfully." > $result_file
+
+    elif [ "$task_status" = '"failed"' ]; then 
+       echo "Error: DMS Task failed to start."
+       echo "DMS Task failed." > $result_file
+       error_flag="true"	   
+    fi
+else
+    echo "Something went wrong in starting DMS Task."
+    echo "Something went wrong in starting DMS Task, DMS Task failed." > $result_file
+	error_flag="true"
+fi
+
+if [[ "$error_flag" == "true" ]]; then 
+   echo "FAILED" > $status_file
+else
+   echo "SUCCESS" > $status_file
+fi

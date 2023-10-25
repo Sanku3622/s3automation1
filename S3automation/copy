@@ -1,24 +1,26 @@
----
+## execute shell process
 - hosts: sitserver
   tasks:
-    - name: CHECK SPACE DETAILS
-      shell: df -kh
-      register: command_out
-    - debug:
-        msg: "{{ command_out.stdout_lines }}"
-    - name: Format disk usage table
-      set_fact:
-        formatted_output: "{{ command_out.stdout_lines | format('%-20s %-10s %-10s %-10s %-10s %-20s', 'Filesystem', 'Size', 'Used', 'Available', 'Use%', 'Mounted on') }}"
-    - name: Send email
-      mail:
-host: "mailrelay-prod.meta.spectrum.net"
-        from: "Mobile2.0-DevOps <Mobile2.0-DevOps@charter.com>"
-        to: "C-Venugopal.Velagani@charter.com, C-Akriti.Babbar@charter.com, C-Purushotham.Tumuluri@charter.com"
-        subject: "Weekly Metrics Reports for Mediation Server Health Checks"
-        body: |
-          Hi All,
+  - name: CHECK SPACE DETAILS
+    shell: df -kh
+    register: command_out
+    
+  - debug:
+      msg: "{{ command_out.stdout_lines }}"
+  - name: Format disk usage table
+    shell: echo "{{ command_out.stdout_lines }}" | tr -d '[]' | tr ',' '\n'
+    register: formatted_output
+  - name: Send email
+    mail:
+      host: "mailrelay-prod.meta.spectrum.net"
+      from: "Mobile2.0-DevOps <Mobile2.0-DevOps@charter.com>"
+      to: "C-Venugopal.Velagani@charter.com,C-Sanket.Kurane@charter.com,C-Akriti.Babbar@charter.com,C-Purushotham.Tumuluri@charter.com"
+      subject: "Weekly Metrics Reports for Mediation Server Health Checks"
+      body: |
+          Hi ALl,
           Please find the Weekly Metrics Reports for Mediation Server Health Checks:
           {{ formatted_output.stdout }}
+          
           Thanks,
           MDA-SRE Team.
-      delegate_to: localhost
+    delegate_to: localhost

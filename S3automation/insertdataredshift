@@ -1,0 +1,117 @@
+# Compare records count between source (oracle) and Target (Redshift)
+#!/bin/sh
+
+WORKSPACE=${CI_PROJECT_DIR}
+source $WORKSPACE/config/${env}-config.properties
+echo "WORKSPACE: $WORKSPACE"
+
+cd $WORKSPACE
+
+result_file=$1
+status_file=$2
+error_flag="false"
+
+if [[ -f "$result_file" ]]; then
+   rm -rf "$result_file"
+fi
+
+if [[ -f "$status_file" ]]; then
+   rm -rf "$status_file"
+fi
+
+connect_db_oracle=host_oracle_url
+connectString_oracle=${!connect_db_oracle}
+
+aws_profile=profile
+profile=${!aws_profile}
+
+devops_aws_profile=devops_profile
+devops_profile=${!devops_aws_profile}
+
+s3=s3_bucket
+bucketname=${!s3}
+
+ssm_env=ssm
+ssm=${!ssm_env}
+
+aws_region=region
+region=${!aws_region}
+
+git=git_branch
+git_env=${!git}
+
+if [[ $profile == "" ]]; then
+    echo "Add AWS profile details in awsprofiledetails for $env"
+    exit 1;
+else        
+    echo "AWS PROFILE: $profile"
+fi
+
+if [[ $host_redshift == "" ]]; then
+    echo "Add connection details in host_redshift for $env"
+    exit 1;
+else
+    echo "Connection String Redshift: $host_redshift"
+fi
+
+## mkdir -p $WORKSPACE/dms-scripts
+mkdir -p $WORKSPACE/dms-scripts
+
+#echo $git_env
+echo "Cloning repo, branch: $git_env"
+git clone -b $git_env  https://$gituser:$gittoken@gitlab.spectrumflow.net/hmno-devops/hmno-nsl-db-scripts.git
+mv hmno-nsl-db-scripts/dms-scripts/* dms-scripts/
+
+## get s3 logs for forward scripts
+export AWS_PROFILE=$profile
+
+#creating path for oracle sql file
+sql_file_redshift=$WORKSPACE/dms-scripts/nbophistory_insert_data_redshift.sql
+echo "Redshift file: $sql_file_redshift"
+echo "REDSHIFT USER: $user_redshift"
+
+## fetch ssm parameters from hmno devops
+ssmval_redshift=nsl-hmno-db-redshift-$ssm
+
+export AWS_PROFILE=$devops_profile
+echo "Fetch password from ssm $ssmval_redshift"
+
+redshift_passwrd=$(aws ssm get-parameters --names $ssmval_redshift --region $region --with-decryption --query Parameters[0].Value)
+
+#removing quotes(") from redshift_passwrd, as it's creating issue in redshift password
+redshift_passwrd=$(echo "$redshift_passwrd" | sed 's|"||g' )
+
+if [[ ${redshift_passwrd} == "null" ]]; then
+    echo "\"$ssmval_redshift\" key not found in SSM Parameter store in HMNO DEVOPS $region region"
+    exit 1;
+fi
+
+echo "**** Starting Redshift sql queries execution ****"
+redshift_log_file=$WORKSPACE/redshift_insert_logs.txt
+
+python3 db_utilities.py "runRedshiftScript" "$sql_file_redshift" "$host_redshift" "$port_redshift" "$db_name_redshift" "$user_redshift" "$redshift_passwrd" > $redshift_log_file
+
+if [[ "$?" != "0" ]]; then
+   echo "something went wrong in script execution"
+   echo "Error during executing the redshift script for data inserting from the staging schema to the target schema in redshift." > $result_file
+   error_flag="true"
+fi
+
+cat $redshift_log_file
+echo "**** Execution done, checking for error ****"
+
+if grep -q "ERROR" $redshift_log_file
+then
+ echo "Error during executing the redshift script. Exiting the job with code:1"
+ echo "Error during executing the redshift script for inserting data from the staging schema to the target schema in redshift." > $result_file
+ error_flag="true"
+else
+  echo "Redshift script executed successfully"
+  echo "Redshift script for inserting data from the staging schema to the target schema executed successfully." > $result_file
+fi
+
+if [[ "$error_flag" == "true" ]]; then 
+   echo "FAILED" > $status_file
+else
+   echo "SUCCESS" > $status_file
+fi

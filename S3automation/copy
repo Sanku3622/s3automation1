@@ -1,14 +1,10 @@
+# Compare records count between source (oracle) and Target (Redshift)
 #!/bin/sh
 WORKSPACE=${CI_PROJECT_DIR}
-cd $WORKSPACE
-
 source $WORKSPACE/config/${env}-config.properties
+echo "WORKSPACE: $WORKSPACE"
 
-aws_profile=profile
-profile=${!aws_profile}
-
-aws_region=region
-region=${!aws_region}
+cd $WORKSPACE
 
 result_file=$1
 status_file=$2
@@ -22,6 +18,41 @@ if [[ -f "$status_file" ]]; then
    rm -rf "$status_file"
 fi
 
+connect_db_oracle=host_oracle_url
+connectString_oracle=${!connect_db_oracle}
+
+aws_profile=profile
+profile=${!aws_profile}
+
+devops_aws_profile=devops_profile
+devops_profile=${!devops_aws_profile}
+
+s3=s3_bucket
+bucketname=${!s3}
+
+ssm_env=ssm
+ssm=${!ssm_env}
+
+aws_region=region
+region=${!aws_region}
+
+git=git_branch
+git_env=${!git}
+
+if [[ $connectString_oracle == "" ]]; then
+    echo "Add connection details in connect_db_oracle for $env"
+    exit 1;
+else
+    echo "Connection String Oracle: $connectString_oracle"
+fi
+
+if [[ $host_redshift == "" ]]; then
+    echo "Add connection details in host_redshift for $env"
+    exit 1;
+else
+    echo "Connection String Redshift: $host_redshift"
+fi
+
 if [[ $profile == "" ]]; then
     echo "Add AWS profile details in awsprofiledetails for $env"
     exit 1;
@@ -29,64 +60,122 @@ else
     echo "AWS PROFILE: $profile"
 fi
 
-# switching AWS profile
-echo "AWS Region: $region"
+## mkdir -p $WORKSPACE/dms-scripts
+mkdir -p $WORKSPACE/dms-scripts
+
+#echo $git_env
+echo "Cloning repo, branch: $git_env"
+git clone -b $git_env  https://$gituser:$gittoken@gitlab.spectrumflow.net/hmno-devops/hmno-nsl-db-scripts.git
+mv hmno-nsl-db-scripts/dms-scripts/* dms-scripts/
+
+## get s3 logs for forward scripts
 export AWS_PROFILE=$profile
 
-ReplicationTaskIdentifier=$(aws --region $region dms describe-replication-tasks --filters "Name=replication-task-arn,Values=$replication_task_arn" --query "ReplicationTasks[0].ReplicationTaskIdentifier")
-echo "DMS Task Name : $ReplicationTaskIdentifier"
+#creating path for oracle and redshift sql file
+sql_file_oracle=$WORKSPACE/dms-scripts/nbophistory_check_count_oracle.sql
+sql_file_redshift=$WORKSPACE/dms-scripts/nbophistory_check_count_redshift.sql
+echo "Oracle file: $sql_file_oracle"
+echo "Redshift file: $sql_file_redshift"
 
-SourceEndpointArn=$(aws --region $region dms describe-replication-tasks --filters "Name=replication-task-arn,Values=$replication_task_arn" --query "ReplicationTasks[0].SourceEndpointArn")
-SourceEndpointURL=$(aws --region $region dms describe-endpoints --filters "Name=endpoint-arn,Values=$SourceEndpointArn" --query "Endpoints[0].ServerName")
-echo "Source DB Enpoint URL : $SourceEndpointURL"
-
-TargetEndpointArn=$(aws --region $region dms describe-replication-tasks --filters "Name=replication-task-arn,Values=$replication_task_arn" --query "ReplicationTasks[0].TargetEndpointArn")
-TargetEndpointURL=$(aws --region $region dms describe-endpoints --filters "Name=endpoint-arn,Values=$TargetEndpointArn" --query "Endpoints[0].ServerName")
-echo "Target DB Enpoint URL : $TargetEndpointURL"
-
-# start DMS task
-echo "Starting DMS task"
-check_task_status=$(aws --region $region dms describe-replication-tasks --filters "Name=replication-task-arn,Values=$replication_task_arn" --query "ReplicationTasks[0].Status")
-if [ "${check_task_status}" != '"running"' ]; then
-    aws dms start-replication-task --replication-task-arn $replication_task_arn --start-replication-task-type reload-target
+## get the schema_env from env file
+if [[ $env == "sit"* ]]; then
+    user_oracle=${schema_oracle}_${schema_env}
 else
-    echo "Task is already running!!"
-    exit 1
+    user_oracle=${schema_oracle}
+fi
+echo "ORACLE USER: $user_oracle"
+echo "REDSHIFT USER: $user_redshift"
+
+## fetch ssm parameters from hmno devops
+ssmval_oracle=nsl-hmno-db-$schema_oracle-$ssm
+ssmval_redshift=nsl-hmno-db-redshift-$ssm
+
+export AWS_PROFILE=$devops_profile
+echo "Fetch password from ssm $ssmval_oracle"
+echo "Fetch password from ssm $ssmval_redshift"
+
+oracle_passwrd=$(aws ssm get-parameters --names $ssmval_oracle --region $region --with-decryption --query Parameters[0].Value)
+redshift_passwrd=$(aws ssm get-parameters --names $ssmval_redshift --region $region --with-decryption --query Parameters[0].Value)
+
+#removing quotes(") from redshift_passwrd, as it's creating issue in redshift password
+redshift_passwrd=$(echo "$redshift_passwrd" | sed 's|"||g' )
+
+if [[ ${oracle_passwrd} == "null" ]]; then
+    echo "\"$ssmval_oracle\" key not found in SSM Parameter store in HMNO DEVOPS $region region"
+    exit 1;
 fi
 
-if [ $? -eq 0 ]; then
+if [[ ${redshift_passwrd} == "null" ]]; then
+    echo "\"$ssmval_redshift\" key not found in SSM Parameter store in HMNO DEVOPS $region region"
+    exit 1;
+fi
 
-    while [ "${task_status}" != '"running"' ] && [ "${task_status}" != '"failed"' ]
-    do
-        echo "Checking status of DMS task"
-        task_status=$(aws --region $region dms describe-replication-tasks --filters "Name=replication-task-arn,Values=$replication_task_arn" --query "ReplicationTasks[0].Status")
-        echo "task status: $task_status"
-		sleep 15
-    done
-    if [ "$task_status" = '"running"' ]; then
-	   echo "DMS Task started successfully."
+echo "**** Starting oracle sql queries execution ****"
+constr=$user_oracle/$oracle_passwrd@$connectString_oracle
+oracle_log_file=$WORKSPACE/oracle_logs.txt
+python3 db_utilities.py "checkCountOracle" "$sql_file_oracle" "$constr" > $oracle_log_file
 
-	   echo "Waiting for replication-task to get completed"
-	   while [ "${rep_task_status}" != '"stopped"' ]
-       do       
-          rep_task_status=$(aws --region $region dms describe-replication-tasks --filters "Name=replication-task-arn,Values=$replication_task_arn" --query "ReplicationTasks[0].Status")
-          echo "replication task status: $rep_task_status"
-		  sleep 15
-       done
-	   
-	   #aws dms wait replication-task-stopped --filters Name="replication-task-arn",Values="$replication_task_arn"
-	   echo "DMS Task completed successfully."
-	   echo "DMS Task completed successfully." > $result_file
+if [[ "$?" != "0" ]]; then
+   echo "something went wrong in script execution"
+   echo "Error during executing the oracle script for validation." > $result_file
+   error_flag="true"
+fi
 
-    elif [ "$task_status" = '"failed"' ]; then 
-       echo "Error: DMS Task failed to start."
-       echo "DMS Task failed." > $result_file
-       error_flag="true"	   
-    fi
+cat $oracle_log_file
+echo "**** Execution done, checking for error ****"
+
+if grep -q "ERROR" $oracle_log_file
+then
+ echo "Error during executing the oracle script. Exiting the job with code:1"
+ echo "Error during executing the oracle script for validation." > $result_file
+ error_flag="true"
 else
-    echo "Something went wrong in starting DMS Task."
-    echo "Something went wrong in starting DMS Task, DMS Task failed." > $result_file
+  echo "Oracle script executed successfully"
+fi
+
+echo "**** Starting Redshift sql queries execution ****"
+redshift_log_file=$WORKSPACE/redshift_logs.txt
+python3 db_utilities.py "checkCountRedshift" "$sql_file_redshift" "$host_redshift" "$port_redshift" "$db_name_redshift" "$user_redshift" "$redshift_passwrd" > $redshift_log_file
+
+if [[ "$?" != "0" ]]; then
+   echo "something went wrong in script execution"
+   echo "Error during executing the redshift script for validation." > $result_file
+   error_flag="true"
+fi
+
+cat $redshift_log_file
+echo "**** Execution done, checking for error ****"
+
+if grep -q "ERROR" $redshift_log_file
+then
+ echo "Error during executing the redshift script. Exiting the job with code:1"
+ echo "Error during executing the redshift script for validation." > $result_file
+ error_flag="true"
+else
+  echo "Redshift script executed successfully"
+fi
+
+echo "Comparing generated files for validation"
+result=$(python3 db_utilities.py "compareFiles" "$oracle_log_file" "$redshift_log_file")
+
+if [[ "$?" != "0" ]]; then
+   echo "something went wrong in script execution"
+   error_flag="true"
+fi
+
+IFS='|' read -ra keys <<< "$result"
+
+matching_keys="${keys[0]}"
+non_matching_keys="${keys[1]}"
+
+if [[ ("$matching_keys" == "") || ("$non_matching_keys" != "") ]]; then
+	echo "non_matching_keys: $non_matching_keys"
+	echo "Validation failed"
+	echo "Validation of source oracle and target redshift is failed." > $result_file
 	error_flag="true"
+else
+	echo "Validation passed"
+	echo "Validation of source oracle and target redshift is passed." > $result_file
 fi
 
 if [[ "$error_flag" == "true" ]]; then 

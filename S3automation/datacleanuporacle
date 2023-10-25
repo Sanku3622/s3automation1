@@ -1,0 +1,121 @@
+# Compare records count between source (oracle) and Target (Redshift)
+#!/bin/sh
+
+WORKSPACE=${CI_PROJECT_DIR}
+source $WORKSPACE/config/${env}-config.properties
+echo "WORKSPACE: $WORKSPACE"
+
+cd $WORKSPACE
+
+result_file=$1
+status_file=$2
+error_flag="false"
+
+if [[ -f "$result_file" ]]; then
+   rm -rf "$result_file"
+fi
+
+if [[ -f "$status_file" ]]; then
+   rm -rf "$status_file"
+fi
+
+connect_db_oracle=host_oracle_url
+connectString_oracle=${!connect_db_oracle}
+
+aws_profile=profile
+profile=${!aws_profile}
+
+devops_aws_profile=devops_profile
+devops_profile=${!devops_aws_profile}
+
+s3=s3_bucket
+bucketname=${!s3}
+
+ssm_env=ssm
+ssm=${!ssm_env}
+
+aws_region=region
+region=${!aws_region}
+
+git=git_branch
+git_env=${!git}
+
+if [[ $connectString_oracle == "" ]]; then
+    echo "Add connection details in connect_db_oracle for $env"
+    exit 1;
+else
+    echo "Connection String Oracle: $connectString_oracle"
+fi
+
+if [[ $profile == "" ]]; then
+    echo "Add AWS profile details in awsprofiledetails for $env"
+    exit 1;
+else        
+    echo "AWS PROFILE: $profile"
+fi
+
+## mkdir -p $WORKSPACE/dms-scripts
+mkdir -p $WORKSPACE/dms-scripts
+
+#echo $git_env
+echo "Cloning repo, branch: $git_env"
+git clone -b $git_env  https://$gituser:$gittoken@gitlab.spectrumflow.net/hmno-devops/hmno-nsl-db-scripts.git
+mv hmno-nsl-db-scripts/dms-scripts/* dms-scripts/
+
+## get s3 logs for forward scripts
+export AWS_PROFILE=$profile
+
+#creating path for oracle and redshift sql file
+sql_file_oracle=$WORKSPACE/dms-scripts/nbophistory_remove_data_oracle.sql
+echo "Oracle file: $sql_file_oracle"
+
+## get the schema_env from env file
+if [[ $env == "sit"* ]]; then
+    user_oracle=${schema_oracle}_${schema_env}
+else
+    user_oracle=${schema_oracle}
+fi
+echo "ORACLE USER: $user_oracle"
+
+## fetch ssm parameters from hmno devops
+ssmval_oracle=nsl-hmno-db-$schema_oracle-$ssm
+
+export AWS_PROFILE=$devops_profile
+echo "Fetch password from ssm $ssmval_oracle"
+
+oracle_passwrd=$(aws ssm get-parameters --names $ssmval_oracle --region $region --with-decryption --query Parameters[0].Value)
+
+if [[ ${oracle_passwrd} == "null" ]]; then
+    echo "\"$ssmval_oracle\" key not found in SSM Parameter store in HMNO DEVOPS $region region"
+    exit 1;
+fi
+
+echo "**** Starting oracle sql queries execution ****"
+constr=$user_oracle/$oracle_passwrd@$connectString_oracle
+oracle_log_file=$WORKSPACE/oracle_cleanup_logs.txt
+python3 db_utilities.py "runOracleScript" "$sql_file_oracle" "$constr" > $oracle_log_file
+
+if [[ "$?" != "0" ]]; then
+   echo "something went wrong in script execution"
+   echo "Error during executing the oracle script for cleanup data from Source AWS oracle RDS schema." > $result_file
+   error_flag="true"
+fi
+
+cat $oracle_log_file
+echo "**** Execution done, checking for error ****"
+
+if grep -q "ERROR" $oracle_log_file
+then
+ echo "Error during executing the oracle script. Exiting the job with code:1"
+ echo "Error during executing the oracle script for cleanup data from Source AWS oracle RDS schema." > $result_file
+ error_flag="true"
+else
+  echo "Oracle script executed successfully"
+  echo "Oracle script for cleanup data from Source AWS oracle RDS schema executed successfully." > $result_file
+fi
+
+if [[ "$error_flag" == "true" ]]; then 
+   echo "FAILED" > $status_file
+else
+   echo "SUCCESS" > $status_file
+fi

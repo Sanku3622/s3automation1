@@ -1,204 +1,314 @@
-#Validation/comparision of postgresql db and Redshift db
-#!/bin/sh
- 
-WORKSPACE=${CI_PROJECT_DIR}                 # Assign the value of CI_PROJECT_DIR to the WORKSPACE variable.
-source $WORKSPACE/config/${env}-config.properties  # Source environment-specific configuration properties.
-echo "WORKSPACE: $WORKSPACE"  # Print the WORKSPACE variable.
- 
-cd $WORKSPACE  # Change the working directory to the specified WORKSPACE.
- 
-result_file=$1  # Get the first command-line argument and assign it to the result_file variable.
-status_file=$2  # Get the second command-line argument and assign it to the status_file variable.
-error_flag="false"  # Initialize the error_flag variable with "false."
- 
-if [[ -f "$result_file" ]]; then  # Check if the result_file exists, and if so, remove it.
-   rm -rf "$result_file"
-fi
- 
-if [[ -f "$status_file" ]]; then  # Check if the status_file exists, and if so, remove it.
-   rm -rf "$status_file"
-fi
- 
-# Various environment variables are being defined here.
-# These variables are sourced from configuration files.
-# They include database connection details, AWS profiles, S3 buckets, and more.
+#db_utilities.py self
+import sys
+import psycopg2
+import subprocess
+import re
 
-connect_db_postgresql=host_postgresql_url
-connectString_postgresql=${!connect_db_postgresql}
+funcName = sys.argv[1]
 
-aws_profile=profile
-profile=${!aws_profile}
+def checkCountpostgresql():
+    #file containing the queries
+    query_file = sys.argv[2]
 
-devops_aws_profile=devops_profile
-devops_profile=${!devops_aws_profile}
+    # Define the connection string
+    connection_string = sys.argv[3]
 
-s3=s3_bucket
-bucketname=${!s3}
+    # Read the SQL queries from the file
+    with open(query_file, 'r') as file:
+        queries = file.read()
 
-ssm_env=ssm
-ssm=${!ssm_env}
+    # Split the queries into separate statements
+    query_statements = queries.split(';')
 
-aws_region=region
-region=${!aws_region}
+    # Regular expression pattern to extract the table name
+    table_name_pattern = r'FROM\s+[\w\.]+\.(?P<table_name>[\w_]+)'
 
-git=git_branch
-git_env=${!git}
+    # Execute each query one by one
+    modified_output = ''
+    for statement in query_statements:
+        # Skip empty statements
+        if not statement.strip():
+            continue
+            
+        #appending a semicolon to the statement
+        statement = statement.strip() + ';'
+        
+        # Execute sqlplus with the connection string and the current statement as input
+        proc = subprocess.Popen(['sqlplus', '-S', connection_string], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+        output, error = proc.communicate(input=statement)
 
-if [[ $connectString_postgresql == "" ]]; then
-    echo "Add connection details in connect_db_postgresql for $env"
-    exit 1;
-else
-    echo "Connection String postgresql: $connectString_postgresql"
-fi
+        # Split the output into lines
+        lines = output.strip().split('\n')
 
-if [[ $host_redshift == "" ]]; then
-    echo "Add connection details in host_redshift for $env"
-    exit 1;
-else
-    echo "Connection String Redshift: $host_redshift"
-fi
+        # Get the table name from the current statement using regular expression
+        table_name_match = re.search(table_name_pattern, statement, re.IGNORECASE)
+        if table_name_match:
+            table_name = table_name_match.group(1)
+        else:
+            table_name = 'Unknown'
 
-if [[ $profile == "" ]]; then
-    echo "Add AWS profile details in awsprofiledetails for $env"
-    exit 1;
-else        
-    echo "AWS PROFILE: $profile"
-fi
+        # Get the result from the last line of the output (excluding the "count(*)" line)
+        result = lines[-1].strip() if lines else 'No result'
+        if "ORA-" in result:
+            result = "ERROR:" + result.strip()
 
-## mkdir -p $WORKSPACE/dms-scripts
-mkdir -p $WORKSPACE/dms-scripts
+        # Append the table name, query, and result to the modified output  
+        modified_output += f'{table_name} = {result}\n'
 
-# Cloning a Git repository to get necessary SQL scripts.
-echo "Cloning repo, branch: $git_env"
-git clone -b $git_env https://$gituser:$gittoken@gitlab.spectrumflow.net/hmno-devops/HMNO-Mediation-Charter
-.git
-mv HMNO-Mediation-Charter/dms-scripts/* dms-scripts/  # Move SQL scripts to a specific directory.
- 
-# Get S3 logs for forward scripts.
-export AWS_PROFILE=$profile  # Set the AWS profile.
- 
-# Define paths for postgresql and Redshift SQL files.
-sql_file_postgresql=$WORKSPACE/dms-scripts/nbophistory_check_count_postgresql.sql
-sql_file_redshift=$WORKSPACE/dms-scripts/nbophistory_check_count_redshift.sql
-echo "postgresql file: $sql_file_postgresql"
-echo "Redshift file: $sql_file_redshift"
- 
-# Determine the postgresql user based on the environment.
-# If the environment starts with "sit," a specific user is used.
-if [[ $env == "sit"* ]]; then
-    user_postgresql=${schema_postgresql}_${schema_env}
-else
-    user_postgresql=${schema_postgresql}
-fi
-echo "POSTGRESQL USER: $user_postgresql"
-echo "REDSHIFT USER: $user_redshift"
- 
-# Fetch SSM parameters from AWS Parameter Store.
-ssmval_postgresql=mediation-hmno-db-$schema_postgresql-$ssm
-ssmval_redshift=mediation-hmno-db-redshift-$ssm
- 
-export AWS_PROFILE=$devops_profile  # Set the AWS profile for DevOps.
-echo "Fetch password from ssm $ssmval_postgresql"
-echo "Fetch password from ssm $ssmval_redshift" 
+    # Close the subprocess and release resources
+    proc.stdin.close()
+    proc.stdout.close()
+    proc.stderr.close()
+    proc.wait()
+    
+    # Print or process the modified output as needed
+    print(modified_output)
 
-# Fetch passwords for postgresql and Redshift from AWS SSM.
-postgresql_passwrd=$(aws ssm get-parameters --names $ssmval_postgresql --region $region --with-decryption --query Parameters[0].Value)
-redshift_passwrd=$(aws ssm get-parameters --names $ssmval_redshift --region $region --with-decryption --query Parameters[0].Value)
- 
-# Remove quotes from the Redshift password.
-redshift_passwrd=$(echo "$redshift_passwrd" | sed 's|"||g' )
- 
-# Check if the postgresql and Redshift passwords were retrieved successfully.
-if [[ ${postgresql_passwrd} == "null" ]]; then
-    echo "\"$ssmval_postgresql\" key not found in SSM Parameter store in HMNO DEVOPS $region region"
-    exit 1;
-fi
- 
-if [[ ${redshift_passwrd} == "null" ]]; then
-    echo "\"$ssmval_redshift\" key not found in SSM Parameter store in HMNO DEVOPS $region region"
-    exit 1;
-fi
- 
-# Execute postgresql SQL queries.
-echo "**** Starting postgresql sql queries execution ****"
-constr=$user_postgresql/$postgresql_passwrd@$connectString_postgresql
-postgresql_log_file=$WORKSPACE/postgresql_logs.txt
-python3 db_utilities.py "checkCountpostgresql" "$sql_file_postgresql" "$constr" > $postgresql_log_file
- 
-# Check for errors during postgresql script execution.
-if [[ "$?" != "0" ]]; then
-   echo "something went wrong in script execution"
-   echo "Error during executing the postgresql script for validation." > $result_file
-   error_flag="true"
-fi
- 
-# Check for errors in the postgresql script execution logs.
-cat $postgresql_log_file
-echo "**** Execution done, checking for error ****"
- 
-if grep -q "ERROR" $postgresql_log_file
-then
-echo "Error during executing the postgresql script. Exiting the job with code:1"
-echo "Error during executing the postgresql script for validation." > $result_file
-error_flag="true"
-else
-  echo "postgresql script executed successfully"
-fi
- 
-# Execute Redshift SQL queries.
-echo "**** Starting Redshift sql queries execution ****"
-redshift_log_file=$WORKSPACE/redshift_logs.txt
-python3 db_utilities.py "checkCountRedshift" "$sql_file_redshift" "$host_redshift" "$port_redshift" "$db_name_redshift" "$user_redshift" "$redshift_passwrd" > $redshift_log_file
- 
-# Check for errors during Redshift script execution.
-if [[ "$?" != "0" ]]; then
-   echo "something went wrong in script execution"
-   echo "Error during executing the Redshift script for validation." > $result_file
-   error_flag="true"
-fi
- 
-# Check for errors in the Redshift script execution logs.
-cat $redshift_log_file
-echo "**** Execution done, checking for error ****"
- 
-if grep -q "ERROR" $redshift_log_file
-then
-echo "Error during executing the Redshift script. Exiting the job with code:1"
-echo "Error during executing the Redshift script for validation." > $result_file
-error_flag="true"
-else
-  echo "Redshift script executed successfully"
-fi
- 
-# Compare generated files for validation.
-echo "Comparing generated files for validation"
-result=$(python3 db_utilities.py "compareFiles" "$postgresql_log_file" "$redshift_log_file")
- 
-# Check for errors during file comparison.
-if [[ "$?" != "0" ]]; then
-   echo "something went wrong in script execution"
-   error_flag="true"
-fi
- 
-# Split the result into matching and non-matching keys.
-IFS='|' read -ra keys <<< "$result"
-matching_keys="${keys[0]}"
-non_matching_keys="${keys[1]}"
- 
-# Check if there are non-matching keys, indicating a validation failure.
-if [[ ("$matching_keys" == "") || ("$non_matching_keys" != "") ]]; then
-echo "non_matching_keys: $non_matching_keys"
-echo "Validation failed"
-echo "Validation of source postgresql and target Redshift is failed." > $result_file
-error_flag="true"
-else
-echo "Validation passed"
-echo "Validation of source postgresql and target Redshift is passed." > $result_file
-fi
- 
-# Set the status based on whether there was an error.
-if [[ "$error_flag" == "true" ]]; then
-   echo "FAILED" > $status_file
-else
-   echo "SUCCESS" > $status_file
-fi
+def checkCountRedshift():
+    #file containing the queries
+    query_file = sys.argv[2]
+
+    # Define the connection parameters for Redshift
+    host = sys.argv[3]
+    port = sys.argv[4]
+    database = sys.argv[5]
+    user = sys.argv[6]
+    password = sys.argv[7]
+
+    # Read the SQL queries from the file
+    with open(query_file, 'r') as file:
+       queries = file.read()
+
+    # Split the queries into separate statements
+    query_statements = queries.split(';')
+
+    # Regular expression pattern to extract the table name
+    table_name_pattern = r'FROM\s+[\w\.]+\.([\w_]+)'
+
+    # Create a connection to Redshift
+    conn = psycopg2.connect(
+        host=host,
+        port=port,
+        database=database,
+        user=user,
+        password=password
+    )
+
+    # Create a cursor object to execute queries
+    cursor = conn.cursor()
+
+    # Execute each query one by one
+    modified_output = ''
+    for statement in query_statements:
+        # Skip empty statements
+        if not statement.strip():
+            continue
+
+        # Execute the current statement
+        cursor.execute(statement)
+
+        # Fetch the result from the executed statement
+        result = cursor.fetchone()[0]
+
+        # Get the table name from the current statement using regular expression
+        table_name_match = re.search(table_name_pattern, statement, re.IGNORECASE)
+        if table_name_match:
+            table_name = table_name_match.group(1)
+        else:
+            table_name = 'Unknown'
+
+        # Append the table_name and result to the modified output
+        modified_output += f'{table_name} = {result}\n'
+
+    # Commit the transaction and close the connection
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+    # Print or process the modified output as needed
+    print(modified_output)
+
+def compareFiles():
+    
+    file1 = sys.argv[2]
+    file2 = sys.argv[3]
+
+    matching_keys = []
+    non_matching_keys = []
+    
+    with open(file1,'r') as file1:
+        content1 = file1.readlines()
+        
+        
+    with open(file2,'r') as file2:
+        content2 = file2.readlines()
+    
+    dict1 = {}
+    for line in content1:
+        line = line.strip()
+        if  '=' in line:
+            key, value = line.split('=')
+            dict1[key.strip()] = value.strip()
+        
+    dict2 = {}
+    for line in content2:
+        line = line.strip()
+        if  '=' in line:
+            key, value = line.split('=')
+            dict2[key.strip()] = value.strip()
+            
+    for key in dict2:        
+        if key in dict1:        
+            if dict1[key] == dict2[key]:    
+                matching_keys.append(key)
+            else:
+                non_matching_keys.append(key)        
+        else:    
+            non_matching_keys.append(key)
+            
+    matching_keys_list = ','.join(matching_keys)
+    non_matching_keys_list = ','.join(non_matching_keys)
+
+    print(matching_keys_list+ "|" +non_matching_keys_list)
+
+def runRedshiftScript():
+    #file containing the queries
+    query_file = sys.argv[2]
+
+    # Define the connection parameters for Redshift
+    host = sys.argv[3]
+    port = sys.argv[4]
+    database = sys.argv[5]
+    user = sys.argv[6]
+    password = sys.argv[7]
+    
+    # Read the SQL queries from the file
+    with open(query_file, 'r') as file:
+       queries = file.read()
+       
+    # Split the queries into separate statements
+    query_statements = queries.split(';')
+    
+    # Regular expression pattern to extract the table name
+    table_name_pattern = r'FROM\s+[\w\.]+\.([\w_]+)'
+    insert_table_name_pattern = r'INTO\s+[\w\.]+\.([\w_]+)'
+
+    # Create a connection to Redshift
+    conn = psycopg2.connect(
+        host=host,
+        port=port,
+        database=database,
+        user=user,
+        password=password
+    )
+
+    # Create a cursor object to execute queries
+    cursor = conn.cursor()
+    
+    # Execute each query one by one
+    modified_output = ''
+    for statement in query_statements:
+        # Skip empty statements
+        if not statement.strip():
+            continue
+
+        # Execute the current statement
+        cursor.execute(statement)
+        
+        #Check if statement is INSERT statement
+        if statement.strip().startswith('INSERT'):
+            #Get the number of affected rows
+            result = cursor.rowcount
+            # Get the table name from the current statement using regular expression
+            table_name_match = re.search(insert_table_name_pattern, statement, re.IGNORECASE)
+            
+        else:
+            # Fetch the result from the executed statement
+            result = cursor.fetchone()[0]
+            # Get the table name from the current statement using regular expression
+            table_name_match = re.search(table_name_pattern, statement, re.IGNORECASE)
+            
+        if table_name_match:
+            table_name = table_name_match.group(1)
+        else:
+            table_name = 'Unknown'
+            
+        if statement.strip().startswith('INSERT'):
+            # Append the table_name and result to the modified output
+            modified_output += f' no. of rows affected in {table_name}: {result}\n'
+        else:
+            # Append the table_name and result to the modified output
+            modified_output += f'{table_name} = {result}\n'
+
+    # Commit the transaction and close the connection
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+    # Print or process the modified output as needed
+    print(modified_output)
+
+def runpostgresqlScript():
+    #file containing the queries
+    query_file = sys.argv[2]
+
+    # Define the connection string
+    connection_string = sys.argv[3]
+
+    # Read the SQL queries from the file
+    with open(query_file, 'r') as file:
+        queries = file.read()
+
+    # Split the queries into separate statements
+    query_statements = queries.split(';')
+
+    # Execute each query one by one
+    modified_output = ''
+    for statement in query_statements:
+        # Skip empty statements
+        if not statement.strip():
+            continue
+            
+        #appending a semicolon to the statement
+        statement = statement.strip() + ';'
+        
+        # Execute sqlplus with the connection string and the current statement as input
+        proc = subprocess.Popen(['sqlplus', '-S', connection_string], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+        output, error = proc.communicate(input=statement)
+
+        # Split the output into lines
+        lines = output.strip().split('\n')
+
+        # Get the result from the last line of the output (excluding the "count(*)" line)
+        result = lines[-1].strip() if lines else 'No result'
+        if "ORA-" in result:
+            result = "ERROR:" + result.strip()
+
+        # Append the table name, query, and result to the modified output  
+        modified_output += f'{result}\n'
+
+    # Close the subprocess and release resources
+    proc.stdin.close()
+    proc.stdout.close()
+    proc.stderr.close()
+    proc.wait()
+    
+    # Print or process the modified output as needed
+    print(modified_output)
+
+
+#functions call
+if funcName == 'checkCountpostgresql':
+    checkCountpostgresql()
+
+if funcName == 'checkCountRedshift':
+    checkCountRedshift()
+
+if funcName == 'compareFiles':
+    compareFiles()
+
+if funcName == 'runRedshiftScript':
+    runRedshiftScript()
+
+if funcName == 'runpostgresqlScript':
+    runpostgresqlScript()

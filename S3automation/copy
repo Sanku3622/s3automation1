@@ -1,18 +1,55 @@
-Cloning repo, branch: poc-dms-automation
-Cloning into 'HMNO-Mediation-Charter'...
-remote: HTTP Basic: Access denied. The provided password or token is incorrect or your account has 2FA enabled and you must use a personal access token instead of a password. See https://gitlab.spectrumflow.net/help/topics/git/troubleshooting_git#error-on-git-fetch-http-basic-access-denied
-fatal: Authentication failed for 'https://gitlab.spectrumflow.net/hmno-devops/HMNO-Mediation-Charter/'
-./validateDMS.sh: line 74: .git: command not found
-mv: cannot stat ‘HMNO-Mediation-Charter/dms-scripts1/*’: No such file or directory
+Running with gitlab-runner 16.5.0 (853330f9)
+  on Gitlab runner for dd-server-mediation-sit-ue1 sdWDxrvP, system ID: s_fa5114c00b60
+Resolving secrets
+00:00
+Preparing the "shell" executor
+00:00
+Using Shell (bash) executor...
+Preparing environment
+00:01
+Running on ip-10-83-2-18.ec2.internal...
+Getting source from Git repository
+00:00
+Fetching changes with git depth set to 50...
+Reinitialized existing Git repository in /home/gitlab-runner/builds/sdWDxrvP/0/hmno-devops/HMNO-Mediation-Charter/.git/
+Checking out df6e5bd6 as detached HEAD (ref is poc-dms-automation)...
+Skipping Git submodules setup
+Executing "step_script" stage of the job script
+00:02
+$ echo "ENVIRONMENT: $env" # collapsed multi-line command
+ENVIRONMENT: sit
+OPERATION: datamigration
+WORKSPACE: /home/gitlab-runner/builds/sdWDxrvP/0/hmno-devops/HMNO-Mediation-Charter
+Connection String postgresql: 47.234.31.21:5434/fm_db_charter
+Connection String Redshift: wtg-nsl-redshift-sit-01.ccg3m3dukvce.us-east-1.redshift.amazonaws.com
+AWS PROFILE: mediation-sit
 postgresql file: /home/gitlab-runner/builds/sdWDxrvP/0/hmno-devops/HMNO-Mediation-Charter/dms-scripts/mmsuper_check_count_postgresql.sql
 Redshift file: /home/gitlab-runner/builds/sdWDxrvP/0/hmno-devops/HMNO-Mediation-Charter/dms-scripts/mmsuper_check_count_redshift.sql
-./validateDMS.sh: line 86: /bin: Is a directory
-./validateDMS.sh: line 94: config/: Is a directory
-POSTGRESQL USER: mmsuper_
+POSTGRESQL USER: mmsuper
 REDSHIFT USER: rsadmin
 Fetch password from ssm mediation-hmno-db-mmsuper-sit
 Fetch password from ssm mediation-hmno-db-redshift-sit
-"mediation-hmno-db-mmsuper-sit" key not found in SSM Parameter store in HMNO DEVOPS us-east-1 region
+**** Starting postgresql sql queries execution ****
+his_trans_failure_details_bkp = 
+**** Execution done, checking for error ****
+postgresql script executed successfully
+**** Starting Redshift sql queries execution ****
+Traceback (most recent call last):
+  File "db_utilities.py", line 176, in <module>
+    checkCountRedshift()
+  File "db_utilities.py", line 91, in checkCountRedshift
+    password=password
+  File "/usr/local/lib64/python3.7/site-packages/psycopg2/__init__.py", line 122, in connect
+    conn = _connect(dsn, connection_factory=connection_factory, **kwasync)
+psycopg2.OperationalError: FATAL:  password authentication failed for user "rsadmin"
+FATAL:  password authentication failed for user "rsadmin"
+something went wrong in script execution
+**** Execution done, checking for error ****
+Redshift script executed successfully
+Comparing generated files for validation
+non_matching_keys: 
+Validation failed
+job_status: FAILED
 Cleaning up project directory and file based variables
 00:00
 ERROR: Job failed: exit status 1

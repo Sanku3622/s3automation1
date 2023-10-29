@@ -1,29 +1,18 @@
-import sys
-import subprocess
-
-def run_sqlplus(sqlplus_script):
-    connectstr=sys.argv[1]
-    p = subprocess.Popen(['sqlplus','-s',connectstr],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
-    (stdout,stderr) = p.communicate(sqlplus_script)
-    stdout_lines = stdout.split("\n")
-    stderr_lines = stderr.split("\n")
-
-    return stdout_lines,stdout;
-
-try:
-    filename='@' + sys.argv[2]
-    sqlplus_script=filename
-    print("starting sql process")
-    sqlplus_output,err = run_sqlplus(sqlplus_script)
-    print("below are the logs")
-    for line in sqlplus_output:
-        print(line)
-    if "ERROR" in err:
-        if "ORA-" in err:
-            print("an error occurred")
-        else:
-            print("success")
-    else:
-        print("success")
-except:
-    print("an error occurred")
+Cloning repo, branch: poc-dms-automation
+Cloning into 'HMNO-Mediation-Charter'...
+remote: HTTP Basic: Access denied. The provided password or token is incorrect or your account has 2FA enabled and you must use a personal access token instead of a password. See https://gitlab.spectrumflow.net/help/topics/git/troubleshooting_git#error-on-git-fetch-http-basic-access-denied
+fatal: Authentication failed for 'https://gitlab.spectrumflow.net/hmno-devops/HMNO-Mediation-Charter/'
+./validateDMS.sh: line 74: .git: command not found
+mv: cannot stat ‘HMNO-Mediation-Charter/dms-scripts1/*’: No such file or directory
+postgresql file: /home/gitlab-runner/builds/sdWDxrvP/0/hmno-devops/HMNO-Mediation-Charter/dms-scripts/mmsuper_check_count_postgresql.sql
+Redshift file: /home/gitlab-runner/builds/sdWDxrvP/0/hmno-devops/HMNO-Mediation-Charter/dms-scripts/mmsuper_check_count_redshift.sql
+./validateDMS.sh: line 86: /bin: Is a directory
+./validateDMS.sh: line 94: config/: Is a directory
+POSTGRESQL USER: mmsuper_
+REDSHIFT USER: rsadmin
+Fetch password from ssm mediation-hmno-db-mmsuper-sit
+Fetch password from ssm mediation-hmno-db-redshift-sit
+"mediation-hmno-db-mmsuper-sit" key not found in SSM Parameter store in HMNO DEVOPS us-east-1 region
+Cleaning up project directory and file based variables
+00:00
+ERROR: Job failed: exit status 1

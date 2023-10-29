@@ -1,55 +1,172 @@
-Running with gitlab-runner 16.5.0 (853330f9)
-  on Gitlab runner for dd-server-mediation-sit-ue1 sdWDxrvP, system ID: s_fa5114c00b60
-Resolving secrets
-00:00
-Preparing the "shell" executor
-00:00
-Using Shell (bash) executor...
-Preparing environment
-00:01
-Running on ip-10-83-2-18.ec2.internal...
-Getting source from Git repository
-00:00
-Fetching changes with git depth set to 50...
-Reinitialized existing Git repository in /home/gitlab-runner/builds/sdWDxrvP/0/hmno-devops/HMNO-Mediation-Charter/.git/
-Checking out df6e5bd6 as detached HEAD (ref is poc-dms-automation)...
-Skipping Git submodules setup
-Executing "step_script" stage of the job script
-00:02
-$ echo "ENVIRONMENT: $env" # collapsed multi-line command
-ENVIRONMENT: sit
-OPERATION: datamigration
-WORKSPACE: /home/gitlab-runner/builds/sdWDxrvP/0/hmno-devops/HMNO-Mediation-Charter
-Connection String postgresql: 47.234.31.21:5434/fm_db_charter
-Connection String Redshift: wtg-nsl-redshift-sit-01.ccg3m3dukvce.us-east-1.redshift.amazonaws.com
-AWS PROFILE: mediation-sit
-postgresql file: /home/gitlab-runner/builds/sdWDxrvP/0/hmno-devops/HMNO-Mediation-Charter/dms-scripts/mmsuper_check_count_postgresql.sql
-Redshift file: /home/gitlab-runner/builds/sdWDxrvP/0/hmno-devops/HMNO-Mediation-Charter/dms-scripts/mmsuper_check_count_redshift.sql
-POSTGRESQL USER: mmsuper
-REDSHIFT USER: rsadmin
-Fetch password from ssm mediation-hmno-db-mmsuper-sit
-Fetch password from ssm mediation-hmno-db-redshift-sit
-**** Starting postgresql sql queries execution ****
-his_trans_failure_details_bkp = 
-**** Execution done, checking for error ****
-postgresql script executed successfully
-**** Starting Redshift sql queries execution ****
-Traceback (most recent call last):
-  File "db_utilities.py", line 176, in <module>
-    checkCountRedshift()
-  File "db_utilities.py", line 91, in checkCountRedshift
-    password=password
-  File "/usr/local/lib64/python3.7/site-packages/psycopg2/__init__.py", line 122, in connect
-    conn = _connect(dsn, connection_factory=connection_factory, **kwasync)
-psycopg2.OperationalError: FATAL:  password authentication failed for user "rsadmin"
-FATAL:  password authentication failed for user "rsadmin"
-something went wrong in script execution
-**** Execution done, checking for error ****
-Redshift script executed successfully
-Comparing generated files for validation
-non_matching_keys: 
-Validation failed
-job_status: FAILED
-Cleaning up project directory and file based variables
-00:00
-ERROR: Job failed: exit status 1
+# Compare records count between source (oracle) and Target (Redshift)
+#!/bin/sh
+
+WORKSPACE=${CI_PROJECT_DIR}
+source $WORKSPACE/config/${env}-config.properties
+echo "WORKSPACE: $WORKSPACE"
+
+cd $WORKSPACE
+
+result_file=$1
+status_file=$2
+error_flag="false"
+
+if [[ -f "$result_file" ]]; then
+   rm -rf "$result_file"
+fi
+
+if [[ -f "$status_file" ]]; then
+   rm -rf "$status_file"
+fi
+
+connect_db_oracle=host_oracle_url
+connectString_oracle=${!connect_db_oracle}
+
+aws_profile=profile
+profile=${!aws_profile}
+
+devops_aws_profile=devops_profile
+devops_profile=${!devops_aws_profile}
+
+s3=s3_bucket
+bucketname=${!s3}
+
+ssm_env=ssm
+ssm=${!ssm_env}
+
+aws_region=region
+region=${!aws_region}
+
+git=git_branch
+git_env=${!git}
+
+if [[ $connectString_oracle == "" ]]; then
+    echo "Add connection details in connect_db_oracle for $env"
+    exit 1;
+else
+    echo "Connection String Oracle: $connectString_oracle"
+fi
+
+if [[ $host_redshift == "" ]]; then
+    echo "Add connection details in host_redshift for $env"
+    exit 1;
+else
+    echo "Connection String Redshift: $host_redshift"
+fi
+
+if [[ $profile == "" ]]; then
+    echo "Add AWS profile details in awsprofiledetails for $env"
+    exit 1;
+else        
+    echo "AWS PROFILE: $profile"
+fi
+
+## get s3 logs for forward scripts
+export AWS_PROFILE=$profile
+
+#creating path for oracle and redshift sql file
+sql_file_oracle=$WORKSPACE/dms-scripts/nbophistory_check_count_oracle.sql
+sql_file_redshift=$WORKSPACE/dms-scripts/nbophistory_check_count_redshift.sql
+echo "Oracle file: $sql_file_oracle"
+echo "Redshift file: $sql_file_redshift"
+
+echo "ORACLE USER: $user_oracle"
+echo "REDSHIFT USER: $user_redshift"
+
+## fetch ssm parameters from hmno devops
+ssmval_oracle=nsl-hmno-db-$schema_oracle-$ssm
+ssmval_redshift=nsl-hmno-db-redshift-$ssm
+
+export AWS_PROFILE=$devops_profile
+echo "Fetch password from ssm $ssmval_oracle"
+echo "Fetch password from ssm $ssmval_redshift"
+
+oracle_passwrd=$(aws ssm get-parameters --names $ssmval_oracle --region $region --with-decryption --query Parameters[0].Value)
+redshift_passwrd=$(aws ssm get-parameters --names $ssmval_redshift --region $region --with-decryption --query Parameters[0].Value)
+
+#removing quotes(") from redshift_passwrd, as it's creating issue in redshift password
+redshift_passwrd=$(echo "$redshift_passwrd" | sed 's|"||g' )
+
+if [[ ${oracle_passwrd} == "null" ]]; then
+    echo "\"$ssmval_oracle\" key not found in SSM Parameter store in HMNO DEVOPS $region region"
+    exit 1;
+fi
+
+if [[ ${redshift_passwrd} == "null" ]]; then
+    echo "\"$ssmval_redshift\" key not found in SSM Parameter store in HMNO DEVOPS $region region"
+    exit 1;
+fi
+
+echo "**** Starting oracle sql queries execution ****"
+constr=$user_oracle/$oracle_passwrd@$connectString_oracle
+oracle_log_file=$WORKSPACE/oracle_logs.txt
+python3 db_utilities.py "checkCountOracle" "$sql_file_oracle" "$constr" > $oracle_log_file
+
+if [[ "$?" != "0" ]]; then
+   echo "something went wrong in script execution"
+   echo "Error during executing the oracle script for validation." > $result_file
+   error_flag="true"
+fi
+
+cat $oracle_log_file
+echo "**** Execution done, checking for error ****"
+
+if grep -q "ERROR" $oracle_log_file
+then
+ echo "Error during executing the oracle script. Exiting the job with code:1"
+ echo "Error during executing the oracle script for validation." > $result_file
+ error_flag="true"
+else
+  echo "Oracle script executed successfully"
+fi
+
+echo "**** Starting Redshift sql queries execution ****"
+redshift_log_file=$WORKSPACE/redshift_logs.txt
+python3 db_utilities.py "checkCountRedshift" "$sql_file_redshift" "$host_redshift" "$port_redshift" "$db_name_redshift" "$user_redshift" "$redshift_passwrd" > $redshift_log_file
+
+if [[ "$?" != "0" ]]; then
+   echo "something went wrong in script execution"
+   echo "Error during executing the redshift script for validation." > $result_file
+   error_flag="true"
+fi
+
+cat $redshift_log_file
+echo "**** Execution done, checking for error ****"
+
+if grep -q "ERROR" $redshift_log_file
+then
+ echo "Error during executing the redshift script. Exiting the job with code:1"
+ echo "Error during executing the redshift script for validation." > $result_file
+ error_flag="true"
+else
+  echo "Redshift script executed successfully"
+fi
+
+echo "Comparing generated files for validation"
+result=$(python3 db_utilities.py "compareFiles" "$oracle_log_file" "$redshift_log_file")
+
+if [[ "$?" != "0" ]]; then
+   echo "something went wrong in script execution"
+   error_flag="true"
+fi
+
+IFS='|' read -ra keys <<< "$result"
+
+matching_keys="${keys[0]}"
+non_matching_keys="${keys[1]}"
+
+if [[ ("$matching_keys" == "") || ("$non_matching_keys" != "") ]]; then
+	echo "non_matching_keys: $non_matching_keys"
+	echo "Validation failed"
+	echo "Validation of source oracle and target redshift is failed." > $result_file
+	error_flag="true"
+else
+	echo "Validation passed"
+	echo "Validation of source oracle and target redshift is passed." > $result_file
+fi
+
+if [[ "$error_flag" == "true" ]]; then 
+   echo "FAILED" > $status_file
+else
+   echo "SUCCESS" > $status_file
+fi

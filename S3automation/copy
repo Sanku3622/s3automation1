@@ -1,29 +1,188 @@
-import sys
-import subprocess
+#Validation/comparision of postgresql db and Redshift db
+#!/bin/sh
+ 
+WORKSPACE=${CI_PROJECT_DIR}                        # Assign the value of CI_PROJECT_DIR to the WORKSPACE variable.
+source $WORKSPACE/config/${env}-config.properties  # Source environment-specific configuration properties.
+echo "WORKSPACE: $WORKSPACE"                       # Print the WORKSPACE variable.
+ 
+cd $WORKSPACE  # Change the working directory to the specified WORKSPACE.
+ 
+result_file=$1      # Get the first command-line argument and assign it to the result_file variable.
+status_file=$2      # Get the second command-line argument and assign it to the status_file variable.
+error_flag="false"  # Initialize the error_flag variable with "false."
+ 
+if [[ -f "$result_file" ]]; then  # Check if the result_file exists, and if so, remove it.
+   rm -rf "$result_file"
+fi
+ 
+if [[ -f "$status_file" ]]; then  # Check if the status_file exists, and if so, remove it.
+   rm -rf "$status_file"
+fi
+ 
+# Various environment variables are being defined here.
+# These variables are sourced from configuration files.
+# They include database connection details, AWS profiles, S3 buckets, and more.
 
-def run_sqlplus(sqlplus_script):
-    connectstr=sys.argv[1]
-    p = subprocess.Popen(['sqlplus','-s',connectstr],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
-    (stdout,stderr) = p.communicate(sqlplus_script)
-    stdout_lines = stdout.split("\n")
-    stderr_lines = stderr.split("\n")
+connect_db_postgresql=host_postgresql_url
+connectString_postgresql=${!connect_db_postgresql}
 
-    return stdout_lines,stdout;
+aws_profile=profile
+profile=${!aws_profile}
 
-try:
-    filename='@' + sys.argv[2]
-    sqlplus_script=filename
-    print("starting sql process")
-    sqlplus_output,err = run_sqlplus(sqlplus_script)
-    print("below are the logs")
-    for line in sqlplus_output:
-        print(line)
-    if "ERROR" in err:
-        if "ORA-" in err:
-            print("an error occurred")
-        else:
-            print("success")
-    else:
-        print("success")
-except:
-    print("an error occurred")
+devops_aws_profile=devops_profile
+devops_profile=${!devops_aws_profile}
+
+s3=s3_bucket
+bucketname=${!s3}
+
+ssm_env=ssm
+ssm=${!ssm_env}
+
+aws_region=region
+region=${!aws_region}
+
+git=git_branch
+git_env=${!git}
+
+if [[ $connectString_postgresql == "" ]]; then
+    echo "Add connection details in connect_db_postgresql for $env"
+    exit 1;
+else
+    echo "Connection String postgresql: $connectString_postgresql"
+fi
+
+if [[ $host_redshift == "" ]]; then
+    echo "Add connection details in host_redshift for $env"
+    exit 1;
+else
+    echo "Connection String Redshift: $host_redshift"
+fi
+
+if [[ $profile == "" ]]; then
+    echo "Add AWS profile details in awsprofiledetails for $env"
+    exit 1;
+else        
+    echo "AWS PROFILE: $profile"
+fi
+
+# Get S3 logs for forward scripts.
+export AWS_PROFILE=$profile  # Set the AWS profile.
+ 
+# Define paths for postgresql and Redshift SQL files.
+sql_file_postgresql=$WORKSPACE/dms-scripts/mmsuper_check_count_postgresql.sql
+sql_file_redshift=$WORKSPACE/dms-scripts/mmsuper_check_count_redshift.sql
+echo "postgresql file: $sql_file_postgresql"
+echo "Redshift file: $sql_file_redshift"
+
+echo "POSTGRESQL USER: $user_postgresql"
+echo "REDSHIFT USER: $user_redshift"
+ 
+# Fetch SSM parameters from AWS Parameter Store.
+ssmval_postgresql=mediation-hmno-db-$schema_postgresql-$ssm
+ssmval_redshift=mediation-hmno-db-redshift-$ssm
+ 
+export AWS_PROFILE=$devops_profile  # Set the AWS profile for DevOps.
+echo "Fetch password from ssm $ssmval_postgresql"
+echo "Fetch password from ssm $ssmval_redshift" 
+
+# Fetch passwords for postgresql and Redshift from AWS SSM.manually in aws paramaeters store create
+postgresql_passwrd=$(aws ssm get-parameters --names $ssmval_postgresql --region $region --with-decryption --query Parameters[0].Value)
+redshift_passwrd=$(aws ssm get-parameters --names $ssmval_redshift --region $region --with-decryption --query Parameters[0].Value)
+ 
+# Remove quotes from the Redshift password.
+redshift_passwrd=$(echo "$redshift_passwrd" | sed 's|"||g' )
+ 
+# Check if the postgresql and Redshift passwords were retrieved successfully.
+if [[ ${postgresql_passwrd} == "null" ]]; then
+    echo "\"$ssmval_postgresql\" key not found in SSM Parameter store in HMNO DEVOPS $region region"
+    exit 1;
+fi
+ 
+if [[ ${redshift_passwrd} == "null" ]]; then
+    echo "\"$ssmval_redshift\" key not found in SSM Parameter store in HMNO DEVOPS $region region"
+    exit 1;
+fi
+ 
+# Execute postgresql SQL queries.
+echo "**** Starting postgresql sql queries execution ****"
+constr=$user_postgresql/$postgresql_passwrd@$connectString_postgresql
+postgresql_log_file=$WORKSPACE/postgresql_logs.txt
+python3 db_utilities.py "checkCountpostgresql" "$sql_file_postgresql" "$constr" > $postgresql_log_file
+ 
+# Check for errors during postgresql script execution.
+if [[ "$?" != "0" ]]; then
+   echo "something went wrong in script execution"
+   echo "Error during executing the postgresql script for validation." > $result_file
+   error_flag="true"
+fi
+ 
+# Check for errors in the postgresql script execution logs.
+cat $postgresql_log_file
+echo "**** Execution done, checking for error ****"
+ 
+if grep -q "ERROR" $postgresql_log_file
+then
+echo "Error during executing the postgresql script. Exiting the job with code:1"
+echo "Error during executing the postgresql script for validation." > $result_file
+error_flag="true"
+else
+  echo "postgresql script executed successfully"
+fi
+ 
+# Execute Redshift SQL queries.
+echo "**** Starting Redshift sql queries execution ****"
+redshift_log_file=$WORKSPACE/redshift_logs.txt
+python3 db_utilities.py "checkCountRedshift" "$sql_file_redshift" "$host_redshift" "$port_redshift" "$db_name_redshift" "$user_redshift" "$redshift_passwrd" > $redshift_log_file
+ 
+# Check for errors during Redshift script execution.
+if [[ "$?" != "0" ]]; then
+   echo "something went wrong in script execution"
+   echo "Error during executing the Redshift script for validation." > $result_file
+   error_flag="true"
+fi
+ 
+# Check for errors in the Redshift script execution logs.
+cat $redshift_log_file
+echo "**** Execution done, checking for error ****"
+ 
+if grep -q "ERROR" $redshift_log_file
+then
+echo "Error during executing the Redshift script. Exiting the job with code:1"
+echo "Error during executing the Redshift script for validation." > $result_file
+error_flag="true"
+else
+  echo "Redshift script executed successfully"
+fi
+ 
+# Compare generated files for validation.
+echo "Comparing generated files for validation"
+result=$(python3 db_utilities.py "compareFiles" "$postgresql_log_file" "$redshift_log_file")
+ 
+# Check for errors during file comparison.
+if [[ "$?" != "0" ]]; then
+   echo "something went wrong in script execution"
+   error_flag="true"
+fi
+ 
+# Split the result into matching and non-matching keys.
+IFS='|' read -ra keys <<< "$result"
+matching_keys="${keys[0]}"
+non_matching_keys="${keys[1]}"
+ 
+# Check if there are non-matching keys, indicating a validation failure.
+if [[ ("$matching_keys" == "") || ("$non_matching_keys" != "") ]]; then
+echo "non_matching_keys: $non_matching_keys"
+echo "Validation failed"
+echo "Validation of source postgresql and target Redshift is failed." > $result_file
+error_flag="true"
+else
+echo "Validation passed"
+echo "Validation of source postgresql and target Redshift is passed." > $result_file
+fi
+ 
+# Set the status based on whether there was an error.
+if [[ "$error_flag" == "true" ]]; then
+   echo "FAILED" > $status_file
+else
+   echo "SUCCESS" > $status_file
+fi

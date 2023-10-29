@@ -1,172 +1,313 @@
-# Compare records count between source (oracle) and Target (Redshift)
-#!/bin/sh
+import sys
+import psycopg2
+import subprocess
+import re
 
-WORKSPACE=${CI_PROJECT_DIR}
-source $WORKSPACE/config/${env}-config.properties
-echo "WORKSPACE: $WORKSPACE"
+funcName = sys.argv[1]
 
-cd $WORKSPACE
+def checkCountOracle():
+    #file containing the queries
+    query_file = sys.argv[2]
 
-result_file=$1
-status_file=$2
-error_flag="false"
+    # Define the connection string
+    connection_string = sys.argv[3]
 
-if [[ -f "$result_file" ]]; then
-   rm -rf "$result_file"
-fi
+    # Read the SQL queries from the file
+    with open(query_file, 'r') as file:
+        queries = file.read()
 
-if [[ -f "$status_file" ]]; then
-   rm -rf "$status_file"
-fi
+    # Split the queries into separate statements
+    query_statements = queries.split(';')
 
-connect_db_oracle=host_oracle_url
-connectString_oracle=${!connect_db_oracle}
+    # Regular expression pattern to extract the table name
+    table_name_pattern = r'FROM\s+[\w\.]+\.(?P<table_name>[\w_]+)'
 
-aws_profile=profile
-profile=${!aws_profile}
+    # Execute each query one by one
+    modified_output = ''
+    for statement in query_statements:
+        # Skip empty statements
+        if not statement.strip():
+            continue
+            
+        #appending a semicolon to the statement
+        statement = statement.strip() + ';'
+        
+        # Execute sqlplus with the connection string and the current statement as input
+        proc = subprocess.Popen(['sqlplus', '-S', connection_string], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+        output, error = proc.communicate(input=statement)
 
-devops_aws_profile=devops_profile
-devops_profile=${!devops_aws_profile}
+        # Split the output into lines
+        lines = output.strip().split('\n')
 
-s3=s3_bucket
-bucketname=${!s3}
+        # Get the table name from the current statement using regular expression
+        table_name_match = re.search(table_name_pattern, statement, re.IGNORECASE)
+        if table_name_match:
+            table_name = table_name_match.group(1)
+        else:
+            table_name = 'Unknown'
 
-ssm_env=ssm
-ssm=${!ssm_env}
+        # Get the result from the last line of the output (excluding the "count(*)" line)
+        result = lines[-1].strip() if lines else 'No result'
+        if "ORA-" in result:
+            result = "ERROR:" + result.strip()
 
-aws_region=region
-region=${!aws_region}
+        # Append the table name, query, and result to the modified output  
+        modified_output += f'{table_name} = {result}\n'
 
-git=git_branch
-git_env=${!git}
+    # Close the subprocess and release resources
+    proc.stdin.close()
+    proc.stdout.close()
+    proc.stderr.close()
+    proc.wait()
+    
+    # Print or process the modified output as needed
+    print(modified_output)
 
-if [[ $connectString_oracle == "" ]]; then
-    echo "Add connection details in connect_db_oracle for $env"
-    exit 1;
-else
-    echo "Connection String Oracle: $connectString_oracle"
-fi
+def checkCountRedshift():
+    #file containing the queries
+    query_file = sys.argv[2]
 
-if [[ $host_redshift == "" ]]; then
-    echo "Add connection details in host_redshift for $env"
-    exit 1;
-else
-    echo "Connection String Redshift: $host_redshift"
-fi
+    # Define the connection parameters for Redshift
+    host = sys.argv[3]
+    port = sys.argv[4]
+    database = sys.argv[5]
+    user = sys.argv[6]
+    password = sys.argv[7]
 
-if [[ $profile == "" ]]; then
-    echo "Add AWS profile details in awsprofiledetails for $env"
-    exit 1;
-else        
-    echo "AWS PROFILE: $profile"
-fi
+    # Read the SQL queries from the file
+    with open(query_file, 'r') as file:
+       queries = file.read()
 
-## get s3 logs for forward scripts
-export AWS_PROFILE=$profile
+    # Split the queries into separate statements
+    query_statements = queries.split(';')
 
-#creating path for oracle and redshift sql file
-sql_file_oracle=$WORKSPACE/dms-scripts/nbophistory_check_count_oracle.sql
-sql_file_redshift=$WORKSPACE/dms-scripts/nbophistory_check_count_redshift.sql
-echo "Oracle file: $sql_file_oracle"
-echo "Redshift file: $sql_file_redshift"
+    # Regular expression pattern to extract the table name
+    table_name_pattern = r'FROM\s+[\w\.]+\.([\w_]+)'
 
-echo "ORACLE USER: $user_oracle"
-echo "REDSHIFT USER: $user_redshift"
+    # Create a connection to Redshift
+    conn = psycopg2.connect(
+        host=host,
+        port=port,
+        database=database,
+        user=user,
+        password=password
+    )
 
-## fetch ssm parameters from hmno devops
-ssmval_oracle=nsl-hmno-db-$schema_oracle-$ssm
-ssmval_redshift=nsl-hmno-db-redshift-$ssm
+    # Create a cursor object to execute queries
+    cursor = conn.cursor()
 
-export AWS_PROFILE=$devops_profile
-echo "Fetch password from ssm $ssmval_oracle"
-echo "Fetch password from ssm $ssmval_redshift"
+    # Execute each query one by one
+    modified_output = ''
+    for statement in query_statements:
+        # Skip empty statements
+        if not statement.strip():
+            continue
 
-oracle_passwrd=$(aws ssm get-parameters --names $ssmval_oracle --region $region --with-decryption --query Parameters[0].Value)
-redshift_passwrd=$(aws ssm get-parameters --names $ssmval_redshift --region $region --with-decryption --query Parameters[0].Value)
+        # Execute the current statement
+        cursor.execute(statement)
 
-#removing quotes(") from redshift_passwrd, as it's creating issue in redshift password
-redshift_passwrd=$(echo "$redshift_passwrd" | sed 's|"||g' )
+        # Fetch the result from the executed statement
+        result = cursor.fetchone()[0]
 
-if [[ ${oracle_passwrd} == "null" ]]; then
-    echo "\"$ssmval_oracle\" key not found in SSM Parameter store in HMNO DEVOPS $region region"
-    exit 1;
-fi
+        # Get the table name from the current statement using regular expression
+        table_name_match = re.search(table_name_pattern, statement, re.IGNORECASE)
+        if table_name_match:
+            table_name = table_name_match.group(1)
+        else:
+            table_name = 'Unknown'
 
-if [[ ${redshift_passwrd} == "null" ]]; then
-    echo "\"$ssmval_redshift\" key not found in SSM Parameter store in HMNO DEVOPS $region region"
-    exit 1;
-fi
+        # Append the table_name and result to the modified output
+        modified_output += f'{table_name} = {result}\n'
 
-echo "**** Starting oracle sql queries execution ****"
-constr=$user_oracle/$oracle_passwrd@$connectString_oracle
-oracle_log_file=$WORKSPACE/oracle_logs.txt
-python3 db_utilities.py "checkCountOracle" "$sql_file_oracle" "$constr" > $oracle_log_file
+    # Commit the transaction and close the connection
+    conn.commit()
+    cursor.close()
+    conn.close()
 
-if [[ "$?" != "0" ]]; then
-   echo "something went wrong in script execution"
-   echo "Error during executing the oracle script for validation." > $result_file
-   error_flag="true"
-fi
+    # Print or process the modified output as needed
+    print(modified_output)
 
-cat $oracle_log_file
-echo "**** Execution done, checking for error ****"
+def compareFiles():
+    
+    file1 = sys.argv[2]
+    file2 = sys.argv[3]
 
-if grep -q "ERROR" $oracle_log_file
-then
- echo "Error during executing the oracle script. Exiting the job with code:1"
- echo "Error during executing the oracle script for validation." > $result_file
- error_flag="true"
-else
-  echo "Oracle script executed successfully"
-fi
+    matching_keys = []
+    non_matching_keys = []
+    
+    with open(file1,'r') as file1:
+        content1 = file1.readlines()
+        
+        
+    with open(file2,'r') as file2:
+        content2 = file2.readlines()
+    
+    dict1 = {}
+    for line in content1:
+        line = line.strip()
+        if  '=' in line:
+            key, value = line.split('=')
+            dict1[key.strip()] = value.strip()
+        
+    dict2 = {}
+    for line in content2:
+        line = line.strip()
+        if  '=' in line:
+            key, value = line.split('=')
+            dict2[key.strip()] = value.strip()
+            
+    for key in dict2:        
+        if key in dict1:        
+            if dict1[key] == dict2[key]:    
+                matching_keys.append(key)
+            else:
+                non_matching_keys.append(key)        
+        else:    
+            non_matching_keys.append(key)
+            
+    matching_keys_list = ','.join(matching_keys)
+    non_matching_keys_list = ','.join(non_matching_keys)
 
-echo "**** Starting Redshift sql queries execution ****"
-redshift_log_file=$WORKSPACE/redshift_logs.txt
-python3 db_utilities.py "checkCountRedshift" "$sql_file_redshift" "$host_redshift" "$port_redshift" "$db_name_redshift" "$user_redshift" "$redshift_passwrd" > $redshift_log_file
+    print(matching_keys_list+ "|" +non_matching_keys_list)
 
-if [[ "$?" != "0" ]]; then
-   echo "something went wrong in script execution"
-   echo "Error during executing the redshift script for validation." > $result_file
-   error_flag="true"
-fi
+def runRedshiftScript():
+    #file containing the queries
+    query_file = sys.argv[2]
 
-cat $redshift_log_file
-echo "**** Execution done, checking for error ****"
+    # Define the connection parameters for Redshift
+    host = sys.argv[3]
+    port = sys.argv[4]
+    database = sys.argv[5]
+    user = sys.argv[6]
+    password = sys.argv[7]
+    
+    # Read the SQL queries from the file
+    with open(query_file, 'r') as file:
+       queries = file.read()
+       
+    # Split the queries into separate statements
+    query_statements = queries.split(';')
+    
+    # Regular expression pattern to extract the table name
+    table_name_pattern = r'FROM\s+[\w\.]+\.([\w_]+)'
+    insert_table_name_pattern = r'INTO\s+[\w\.]+\.([\w_]+)'
 
-if grep -q "ERROR" $redshift_log_file
-then
- echo "Error during executing the redshift script. Exiting the job with code:1"
- echo "Error during executing the redshift script for validation." > $result_file
- error_flag="true"
-else
-  echo "Redshift script executed successfully"
-fi
+    # Create a connection to Redshift
+    conn = psycopg2.connect(
+        host=host,
+        port=port,
+        database=database,
+        user=user,
+        password=password
+    )
 
-echo "Comparing generated files for validation"
-result=$(python3 db_utilities.py "compareFiles" "$oracle_log_file" "$redshift_log_file")
+    # Create a cursor object to execute queries
+    cursor = conn.cursor()
+    
+    # Execute each query one by one
+    modified_output = ''
+    for statement in query_statements:
+        # Skip empty statements
+        if not statement.strip():
+            continue
 
-if [[ "$?" != "0" ]]; then
-   echo "something went wrong in script execution"
-   error_flag="true"
-fi
+        # Execute the current statement
+        cursor.execute(statement)
+        
+        #Check if statement is INSERT statement
+        if statement.strip().startswith('INSERT'):
+            #Get the number of affected rows
+            result = cursor.rowcount
+            # Get the table name from the current statement using regular expression
+            table_name_match = re.search(insert_table_name_pattern, statement, re.IGNORECASE)
+            
+        else:
+            # Fetch the result from the executed statement
+            result = cursor.fetchone()[0]
+            # Get the table name from the current statement using regular expression
+            table_name_match = re.search(table_name_pattern, statement, re.IGNORECASE)
+            
+        if table_name_match:
+            table_name = table_name_match.group(1)
+        else:
+            table_name = 'Unknown'
+            
+        if statement.strip().startswith('INSERT'):
+            # Append the table_name and result to the modified output
+            modified_output += f' no. of rows affected in {table_name}: {result}\n'
+        else:
+            # Append the table_name and result to the modified output
+            modified_output += f'{table_name} = {result}\n'
 
-IFS='|' read -ra keys <<< "$result"
+    # Commit the transaction and close the connection
+    conn.commit()
+    cursor.close()
+    conn.close()
 
-matching_keys="${keys[0]}"
-non_matching_keys="${keys[1]}"
+    # Print or process the modified output as needed
+    print(modified_output)
 
-if [[ ("$matching_keys" == "") || ("$non_matching_keys" != "") ]]; then
-	echo "non_matching_keys: $non_matching_keys"
-	echo "Validation failed"
-	echo "Validation of source oracle and target redshift is failed." > $result_file
-	error_flag="true"
-else
-	echo "Validation passed"
-	echo "Validation of source oracle and target redshift is passed." > $result_file
-fi
+def runOracleScript():
+    #file containing the queries
+    query_file = sys.argv[2]
 
-if [[ "$error_flag" == "true" ]]; then 
-   echo "FAILED" > $status_file
-else
-   echo "SUCCESS" > $status_file
-fi
+    # Define the connection string
+    connection_string = sys.argv[3]
+
+    # Read the SQL queries from the file
+    with open(query_file, 'r') as file:
+        queries = file.read()
+
+    # Split the queries into separate statements
+    query_statements = queries.split(';')
+
+    # Execute each query one by one
+    modified_output = ''
+    for statement in query_statements:
+        # Skip empty statements
+        if not statement.strip():
+            continue
+            
+        #appending a semicolon to the statement
+        statement = statement.strip() + ';'
+        
+        # Execute sqlplus with the connection string and the current statement as input
+        proc = subprocess.Popen(['sqlplus', '-S', connection_string], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+        output, error = proc.communicate(input=statement)
+
+        # Split the output into lines
+        lines = output.strip().split('\n')
+
+        # Get the result from the last line of the output (excluding the "count(*)" line)
+        result = lines[-1].strip() if lines else 'No result'
+        if "ORA-" in result:
+            result = "ERROR:" + result.strip()
+
+        # Append the table name, query, and result to the modified output  
+        modified_output += f'{result}\n'
+
+    # Close the subprocess and release resources
+    proc.stdin.close()
+    proc.stdout.close()
+    proc.stderr.close()
+    proc.wait()
+    
+    # Print or process the modified output as needed
+    print(modified_output)
+
+
+#functions call
+if funcName == 'checkCountOracle':
+    checkCountOracle()
+
+if funcName == 'checkCountRedshift':
+    checkCountRedshift()
+
+if funcName == 'compareFiles':
+    compareFiles()
+
+if funcName == 'runRedshiftScript':
+    runRedshiftScript()
+
+if funcName == 'runOracleScript':
+    runOracleScript()

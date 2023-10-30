@@ -1,29 +1,64 @@
 import sys
+import psycopg2
 import subprocess
- 
-def run_psql(psql_script):
-    connectstr = sys.argv[1]
-    p = subprocess.Popen(['psql', connectstr], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    (stdout, stderr) = p.communicate(psql_script)
-    stdout_lines = stdout.split("\n")
-    stderr_lines = stderr.split("\n")
- 
-    return stdout_lines, stdout
- 
-try:
-    filename = sys.argv[2]
-    psql_script = filename
-    print("Starting psql process")
-    psql_output, err = run_psql(psql_script)
-    print("Below are the logs")
-    for line in psql_output:
-        print(line)
-    if "ERROR" in err:
-        if "ERROR:" in err:
-            print("An error occurred")
+import re
+
+funcName = sys.argv[1]
+
+def checkCountOracle():
+    #file containing the queries
+    query_file = sys.argv[2]
+
+    # Define the connection string
+    connection_string = sys.argv[3]
+
+    # Read the SQL queries from the file
+    with open(query_file, 'r') as file:
+        queries = file.read()
+
+    # Split the queries into separate statements
+    query_statements = queries.split(';')
+
+    # Regular expression pattern to extract the table name
+    table_name_pattern = r'FROM\s+[\w\.]+\.(?P<table_name>[\w_]+)'
+
+    # Execute each query one by one
+    modified_output = ''
+    for statement in query_statements:
+        # Skip empty statements
+        if not statement.strip():
+            continue
+            
+        #appending a semicolon to the statement
+        statement = statement.strip() + ';'
+        
+        # Execute sqlplus with the connection string and the current statement as input
+        proc = subprocess.Popen(['sqlplus', '-S', connection_string], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+        output, error = proc.communicate(input=statement)
+
+        # Split the output into lines
+        lines = output.strip().split('\n')
+
+        # Get the table name from the current statement using regular expression
+        table_name_match = re.search(table_name_pattern, statement, re.IGNORECASE)
+        if table_name_match:
+            table_name = table_name_match.group(1)
         else:
-            print("Success")
-    else:
-        print("Success")
-except:
-    print("An error occurred")
+            table_name = 'Unknown'
+
+        # Get the result from the last line of the output (excluding the "count(*)" line)
+        result = lines[-1].strip() if lines else 'No result'
+        if "ORA-" in result:
+            result = "ERROR:" + result.strip()
+
+        # Append the table name, query, and result to the modified output  
+        modified_output += f'{table_name} = {result}\n'
+
+    # Close the subprocess and release resources
+    proc.stdin.close()
+    proc.stdout.close()
+    proc.stderr.close()
+    proc.wait()
+    
+    # Print or process the modified output as needed
+    print(modified_output)

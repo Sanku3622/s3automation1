@@ -1,29 +1,21 @@
-import sys
-import subprocess
-
-def run_sqlplus(sqlplus_script):
-    connectstr=sys.argv[1]
-    p = subprocess.Popen(['sqlplus','-s',connectstr],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
-    (stdout,stderr) = p.communicate(sqlplus_script)
-    stdout_lines = stdout.split("\n")
-    stderr_lines = stderr.split("\n")
-
-    return stdout_lines,stdout;
-
-try:
-    filename='@' + sys.argv[2]
-    sqlplus_script=filename
-    print("starting sql process")
-    sqlplus_output,err = run_sqlplus(sqlplus_script)
-    print("below are the logs")
-    for line in sqlplus_output:
-        print(line)
-    if "ERROR" in err:
-        if "ORA-" in err:
-            print("an error occurred")
-        else:
-            print("success")
-    else:
-        print("success")
-except:
-    print("an error occurred")
+*** Starting postgresql sql queries execution ****
+redshift_dpfo_notification_2_bkp = 
+**** Execution done, checking for error ****
+postgresql script executed successfully
+**** Starting Redshift sql queries execution ****
+Traceback (most recent call last):
+  File "db_utilities.py", line 176, in <module>
+    checkCountRedshift()
+  File "db_utilities.py", line 105, in checkCountRedshift
+    cursor.execute(statement)
+psycopg2.errors.InvalidSchemaName: schema "mmsuper_stg_bkp" does not exist
+something went wrong in script execution
+**** Execution done, checking for error ****
+Redshift script executed successfully
+Comparing generated files for validation
+non_matching_keys: 
+Validation failed
+job_status: FAILED
+Cleaning up project directory and file based variables
+00:00
+ERROR: Job failed: exit status 1

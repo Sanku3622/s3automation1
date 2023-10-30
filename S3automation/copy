@@ -1,15 +1,180 @@
-profile=mediation-sit
-devops_profile=default
-db_name_postgresql=fm_db_charter
-host_postgresql=47.234.31.21
-host_postgresql_url=47.234.31.21:5434/fm_db_charter
-schema_postgresql=mmsuper
-host_redshift=wtg-nsl-redshift-sit-01.ccg3m3dukvce.us-east-1.redshift.amazonaws.com
-port_redshift=5439
-db_name_redshift=nsl_rs_sit_db
-user_redshift=rsadmin
-s3_bucket=
-git_branch=poc-dms-automation
-ssm=sit
-region=us-east-1
-replication_task_arn=arn:aws:dms:us-east-1:155077822508:task:6UMFZILUQEYE5QDFACO6IGLTS2JYU6GRUIT6X2I
+import sys
+import psycopg2
+import subprocess
+import re
+ 
+funcName = sys.argv[1]
+ 
+def checkCountpostgresql():
+    # File containing the queries
+    query_file = sys.argv[2]
+ 
+    # Define the connection string
+    connection_string = sys.argv[3]
+ 
+    # Read the SQL queries from the file
+    with open(query_file, 'r') as file:
+        queries = file.read()
+ 
+    # Split the queries into separate statements
+    query_statements = queries.split(';')
+ 
+    # Execute each query one by one
+    modified_output = ''
+    for statement in query_statements:
+        # Skip empty statements
+        if not statement.strip():
+            continue
+ 
+        # Appending a semicolon to the statement
+        statement = statement.strip() + ';'
+ 
+        # Execute psql with the connection string and the current statement as input
+        proc = subprocess.Popen(['psql', connection_string], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+        output, error = proc.communicate(input=statement)
+ 
+        # Split the output into lines
+        lines = output.strip().split('\n')
+ 
+        # Get the table name from the current statement using regular expression
+        table_name_pattern = r'FROM\s+[\w\.]+\.(?P<table_name>[\w_]+)'
+        table_name_match = re.search(table_name_pattern, statement, re.IGNORECASE)
+        if table_name_match:
+            table_name = table_name_match.group(1)
+        else:
+            table_name = 'Unknown'
+ 
+        # Get the result from the last line of the output (excluding the "count(*)" line)
+        result = lines[-1].strip() if lines else 'No result'
+        if "ERROR" in result:
+            result = "ERROR:" + result.strip()
+ 
+        # Append the table name, query, and result to the modified output
+        modified_output += f'{table_name} = {result}\n'
+ 
+    # Close the subprocess and release resources
+    proc.stdin.close()
+    proc.stdout.close()
+    proc.stderr.close()
+    proc.wait()
+ 
+    # Print or process the modified output as needed
+    print(modified_output)
+
+def checkCountRedshift():
+    #file containing the queries
+    query_file = sys.argv[2]
+
+    # Define the connection parameters for Redshift
+    host = sys.argv[3]
+    port = sys.argv[4]
+    database = sys.argv[5]
+    user = sys.argv[6]
+    password = sys.argv[7]
+
+    # Read the SQL queries from the file
+    with open(query_file, 'r') as file:
+       queries = file.read()
+
+    # Split the queries into separate statements
+    query_statements = queries.split(';')
+
+    # Regular expression pattern to extract the table name
+    table_name_pattern = r'FROM\s+[\w\.]+\.([\w_]+)'
+
+    # Create a connection to Redshift
+    conn = psycopg2.connect(
+        host=host,
+        port=port,
+        database=database,
+        user=user,
+        password=password
+    )
+
+    # Create a cursor object to execute queries
+    cursor = conn.cursor()
+
+    # Execute each query one by one
+    modified_output = ''
+    for statement in query_statements:
+        # Skip empty statements
+        if not statement.strip():
+            continue
+
+        # Execute the current statement
+        cursor.execute(statement)
+
+        # Fetch the result from the executed statement
+        result = cursor.fetchone()[0]
+
+        # Get the table name from the current statement using regular expression
+        table_name_match = re.search(table_name_pattern, statement, re.IGNORECASE)
+        if table_name_match:
+            table_name = table_name_match.group(1)
+        else:
+            table_name = 'Unknown'
+
+        # Append the table_name and result to the modified output
+        modified_output += f'{table_name} = {result}\n'
+
+    # Commit the transaction and close the connection
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+    # Print or process the modified output as needed
+    print(modified_output)
+
+def compareFiles():
+    
+    file1 = sys.argv[2]
+    file2 = sys.argv[3]
+
+    matching_keys = []
+    non_matching_keys = []
+    
+    with open(file1,'r') as file1:
+        content1 = file1.readlines()
+        
+        
+    with open(file2,'r') as file2:
+        content2 = file2.readlines()
+    
+    dict1 = {}
+    for line in content1:
+        line = line.strip()
+        if  '=' in line:
+            key, value = line.split('=')
+            dict1[key.strip()] = value.strip()
+        
+    dict2 = {}
+    for line in content2:
+        line = line.strip()
+        if  '=' in line:
+            key, value = line.split('=')
+            dict2[key.strip()] = value.strip()
+            
+    for key in dict2:        
+        if key in dict1:        
+            if dict1[key] == dict2[key]:    
+                matching_keys.append(key)
+            else:
+                non_matching_keys.append(key)        
+        else:    
+            non_matching_keys.append(key)
+            
+    matching_keys_list = ','.join(matching_keys)
+    non_matching_keys_list = ','.join(non_matching_keys)
+
+    print(matching_keys_list+ "|" +non_matching_keys_list)
+
+#functions call
+if funcName == 'checkCountpostgresql':
+    checkCountpostgresql()
+
+if funcName == 'checkCountRedshift':
+    checkCountRedshift()
+
+if funcName == 'compareFiles':
+    compareFiles()
+

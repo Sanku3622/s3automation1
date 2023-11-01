@@ -45,3 +45,6 @@ def runOracleScript():
     
     # Print or process the modified output as needed
     print(modified_output)
+
+if funcName == 'runOracleScript':
+    runOracleScript()

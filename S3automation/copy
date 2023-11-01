@@ -48,3 +48,6 @@ def runOracleScript():
 
 if funcName == 'runOracleScript':
     runOracleScript()
+
+python3 db_utilities.py "runpostgresqlScript" "$sql_file_postgresql" "$host_postgresql" "$port_postgresql" "$db_name_postgresql" "$user_postgresql" "$postgresql_passwrd" > $postgresql_log_file
+

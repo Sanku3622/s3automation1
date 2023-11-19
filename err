@@ -1,8 +1,10 @@
- File "db_utilities.py", line 267, in <module>
+*** Starting postgresql sql queries execution ****
+Traceback (most recent call last):
+  File "db_utilities.py", line 278, in <module>
     runpostgresqlScript()
-  File "db_utilities.py", line 153, in runpostgresqlScript
-    table_name = statement.split('TRUNCATE TABLE')[1].strip()
-IndexError: list index out of range
+  File "db_utilities.py", line 164, in runpostgresqlScript
+    cursor.execute(vacuum_statement)
+psycopg2.errors.ActiveSqlTransaction: VACUUM cannot run inside a transaction block
 something went wrong in script execution
 **** Execution done, checking for error ****
 postgresql script executed successfully

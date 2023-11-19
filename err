@@ -1,10 +1,2 @@
-Traceback (most recent call last):
-  File "db_utilities.py", line 284, in <module>
-    runpostgresqlScript()
-  File "db_utilities.py", line 177, in runpostgresqlScript
-    if post_vacuum_count == 0:
-NameError: name 'post_vacuum_count' is not defined
-something went wrong in script execution
-**** Execution done, checking for error ****
-postgresql script executed successfully
-job_status: FAILED
+**** Starting postgresql sql queries execution ****
+Error: Table 'mmsuper.redshift_dpfo_notification_2_bkp' not truncated or vacuumed.

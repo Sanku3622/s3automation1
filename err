@@ -1,0 +1,9 @@
+ File "db_utilities.py", line 267, in <module>
+    runpostgresqlScript()
+  File "db_utilities.py", line 153, in runpostgresqlScript
+    table_name = statement.split('TRUNCATE TABLE')[1].strip()
+IndexError: list index out of range
+something went wrong in script execution
+**** Execution done, checking for error ****
+postgresql script executed successfully
+job_status: FAILED

@@ -1,10 +1,9 @@
-*** Starting postgresql sql queries execution ****
 Traceback (most recent call last):
-  File "db_utilities.py", line 278, in <module>
+  File "db_utilities.py", line 284, in <module>
     runpostgresqlScript()
-  File "db_utilities.py", line 164, in runpostgresqlScript
-    cursor.execute(vacuum_statement)
-psycopg2.errors.ActiveSqlTransaction: VACUUM cannot run inside a transaction block
+  File "db_utilities.py", line 177, in runpostgresqlScript
+    if post_vacuum_count == 0:
+NameError: name 'post_vacuum_count' is not defined
 something went wrong in script execution
 **** Execution done, checking for error ****
 postgresql script executed successfully

@@ -1,96 +1,82 @@
-#!/bin/sh
- 
-WORKSPACE=${CI_PROJECT_DIR}
-source $WORKSPACE/config/${env}-config.properties
-echo "WORKSPACE: $WORKSPACE"
- 
-cd $WORKSPACE
- 
-result_file=$1
-status_file=$2
-error_flag="false"
- 
-if [[ -f "$result_file" ]]; then
-   rm -rf "$result_file"
-fi
- 
-if [[ -f "$status_file" ]]; then
-   rm -rf "$status_file"
-fi
- 
-aws_profile=profile
-profile=${!aws_profile}
- 
-ssm_env=ssm
-ssm=${!ssm_env}
- 
-aws_region=region
-region=${!aws_region}
- 
-if [[ $host_postgresql == "" ]]; then
-    echo "Add connection details in connect_db_postgresql for $env"
-    exit 1;
-else
-    echo "Connection String postgresql: $host_postgresql"
-fi
- 
-if [[ $profile == "" ]]; then
-    echo "Add AWS profile details in awsprofiledetails for $env"
-    exit 1;
-else        
-    echo "AWS PROFILE: $profile"
-fi
- 
-## get s3 logs for forward scripts
-export AWS_PROFILE=$profile
- 
-#creating path for postgresql and redshift sql file
-sql_file_postgresql=$WORKSPACE/dms-scripts/mmsuper_remove_data_postgresql.sql
-echo "postgresql file: $sql_file_postgresql"
+variables:
+  env:
+    value: "sit"
+    description: "Enter the environment name: sit1/uat/preprod/preproddr1/hotfix/prod/proddr"
+  resource:
+    value: "select"
+    description: "Select the resource name."
+    options:
+      - "select"
+      - "EC2"
+      - "RDS"
+      - "S3"
+      - "EKS"
+      - "ELB"
+      - "ROUTE53"
+      - "SG"
+      - "IAM"
+      - "OPENSEARCH"
+      - "LAMBDA"
+      - "API"
+      - "DMS"
+      - "REDSHIFT"
+stages:
+    - Audit
 
-echo "POSTGRES USER: $user_postgresql"
- 
-## fetch ssm parameters from hmno devops
-ssmval_postgresql=mediation-hmno-db-$schema_postgresql-$ssm
- 
-export AWS_PROFILE=$devops_profile
-echo "Fetch password from ssm $ssmval_postgresql"
- 
-postgresql_passwrd=$(aws ssm get-parameters --names $ssmval_postgresql --region $region --with-decryption --query Parameters[0].Value)
-
-postgresql_passwrd=$(echo "$postgresql_passwrd" | sed 's|"||g' )
-
-if [[ ${postgresql_passwrd} == "null" ]]; then
-    echo "\"$ssmval_postgresql\" key not found in SSM Parameter store in HMNO DEVOPS $region region"
-    exit 1;
-fi
- 
-echo "**** Starting postgresql sql queries execution ****"
-postgresql_log_file=$WORKSPACE/postgresql_cleanup_logs.txt
-python3 db_utilities.py "runpostgresqlScript" "$sql_file_postgresql" "$host_postgresql" "$port_postgresql" "$db_name_postgresql" "$user_postgresql" "$postgresql_passwrd" > $postgresql_log_file
-
-if [[ "$?" != "0" ]]; then
-   echo "something went wrong in script execution"
-   echo "Error during executing the postgres script for cleanup data from Source." > $result_file
-   error_flag="true"
-fi
- 
-cat $postgresql_log_file
-echo "**** Execution done, checking for error ****"
- 
-if grep -q "ERROR" $postgresql_log_file
-then
- echo "Error during executing the postgresql script. Exiting the job with code:1"
- echo "Error during executing the postgresql script for cleanup data from Source." > $result_file
- error_flag="true"
-else
-  echo "postgresql script executed successfully"
-  echo "postgresql script for cleanup data from Source executed successfully." > $result_file
-fi
- 
-if [[ "$error_flag" == "true" ]]; then
-   echo "FAILED" > $status_file
-else
-   echo "SUCCESS" > $status_file
-fi
- 
+Job - Prepare the Audit report for AWS resources:
+  stage: Audit
+  script:
+    - | 
+      set +x    
+      cd ${CI_PROJECT_DIR}/
+      find . -type f -name "*.*" -exec chmod u=rwx {} \;
+      if [[ "${resource^^}" == "EC2" ]]; then
+        echo "Executing operation $resource in ${env^^} environment"
+        python3 ec2.py "$env"
+      elif [[ "${resource^^}" == "EKS" ]]; then
+        echo "Deploying selective components with different release number now..."
+        python3 EKS_Audit.py "$env"
+      elif [[ "${resource^^}" == "S3" ]]; then
+        echo "Executing operation $resource in ${env^^} environment"
+        python3 S3.py "$env"
+      elif [[ "${resource^^}" == "RDS" ]]; then
+        echo "Executing operation $resource in ${env^^} environment"
+        python3 rds.py "$env"
+      elif [[ "${resource^^}" == "ELB" ]]; then
+        echo "Executing operation $resource in ${env^^} environment"
+        python3 LB_Audit.py "$env"
+      elif [[ "${resource^^}" == "ROUTE53" ]]; then
+        echo "Executing operation $resource in ${env^^} environment"
+        python3 route53_audit.py "$env"
+      elif [[ "${resource^^}" == "SG" ]]; then
+        echo "Executing operation $resource in ${env^^} environment"
+        python3 sg-audit.py "$env" 
+      elif [[ "${resource^^}" == "IAM" ]]; then
+        echo "Executing operation $resource in ${env^^} environment"
+        python3 iam-audit.py "$env" 
+      elif [[ "${resource^^}" == "OPENSEARCH" ]]; then
+        echo "Executing operation $resource in ${env^^} environment"
+        python3 opensearch.py "$env"
+      elif [[ "${resource^^}" == "LAMBDA" ]]; then
+        echo "Executing operation $resource in ${env^^} environment"
+        python3 lambda.py "$env"
+      elif [[ "${resource^^}" == "API" ]]; then
+        echo "Executing operation $resource in ${env^^} environment"
+        python3 api-audit.py "$env" 
+      elif [[ "${resource^^}" == "DMS" ]]; then
+        echo "Executing operation $resource in ${env^^} environment"
+        python3 dms-audit.py "$env" 
+      elif [[ "${resource^^}" == "REDSHIFT" ]]; then
+        echo "Executing operation $resource in ${env^^} environment"
+        python3 redshift-audit.py "$env" 
+      else
+        echo "Input variable \"resource\" does not have one of the expected values: EKS/EC2/RDS/API/ROUTE53/S3/ELB/SG/OPENSEARCH/LAMBDA/DMS/REDSHIFT"
+        exit 1
+      fi
+  when: manual
+  allow_failure: false
+  only:
+    refs:
+      - aws-resource-audit
+  tags: 
+    - dds-server-sre-metric-reports

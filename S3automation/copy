@@ -1,82 +1,66 @@
-variables:
-  env:
-    value: "sit"
-    description: "Enter the environment name: sit1/uat/preprod/preproddr1/hotfix/prod/proddr"
-  resource:
-    value: "select"
-    description: "Select the resource name."
-    options:
-      - "select"
-      - "EC2"
-      - "RDS"
-      - "S3"
-      - "EKS"
-      - "ELB"
-      - "ROUTE53"
-      - "SG"
-      - "IAM"
-      - "OPENSEARCH"
-      - "LAMBDA"
-      - "API"
-      - "DMS"
-      - "REDSHIFT"
-stages:
-    - Audit
-
-Job - Prepare the Audit report for AWS resources:
-  stage: Audit
-  script:
-    - | 
-      set +x    
-      cd ${CI_PROJECT_DIR}/
-      find . -type f -name "*.*" -exec chmod u=rwx {} \;
-      if [[ "${resource^^}" == "EC2" ]]; then
-        echo "Executing operation $resource in ${env^^} environment"
-        python3 ec2.py "$env"
-      elif [[ "${resource^^}" == "EKS" ]]; then
-        echo "Deploying selective components with different release number now..."
-        python3 EKS_Audit.py "$env"
-      elif [[ "${resource^^}" == "S3" ]]; then
-        echo "Executing operation $resource in ${env^^} environment"
-        python3 S3.py "$env"
-      elif [[ "${resource^^}" == "RDS" ]]; then
-        echo "Executing operation $resource in ${env^^} environment"
-        python3 rds.py "$env"
-      elif [[ "${resource^^}" == "ELB" ]]; then
-        echo "Executing operation $resource in ${env^^} environment"
-        python3 LB_Audit.py "$env"
-      elif [[ "${resource^^}" == "ROUTE53" ]]; then
-        echo "Executing operation $resource in ${env^^} environment"
-        python3 route53_audit.py "$env"
-      elif [[ "${resource^^}" == "SG" ]]; then
-        echo "Executing operation $resource in ${env^^} environment"
-        python3 sg-audit.py "$env" 
-      elif [[ "${resource^^}" == "IAM" ]]; then
-        echo "Executing operation $resource in ${env^^} environment"
-        python3 iam-audit.py "$env" 
-      elif [[ "${resource^^}" == "OPENSEARCH" ]]; then
-        echo "Executing operation $resource in ${env^^} environment"
-        python3 opensearch.py "$env"
-      elif [[ "${resource^^}" == "LAMBDA" ]]; then
-        echo "Executing operation $resource in ${env^^} environment"
-        python3 lambda.py "$env"
-      elif [[ "${resource^^}" == "API" ]]; then
-        echo "Executing operation $resource in ${env^^} environment"
-        python3 api-audit.py "$env" 
-      elif [[ "${resource^^}" == "DMS" ]]; then
-        echo "Executing operation $resource in ${env^^} environment"
-        python3 dms-audit.py "$env" 
-      elif [[ "${resource^^}" == "REDSHIFT" ]]; then
-        echo "Executing operation $resource in ${env^^} environment"
-        python3 redshift-audit.py "$env" 
-      else
-        echo "Input variable \"resource\" does not have one of the expected values: EKS/EC2/RDS/API/ROUTE53/S3/ELB/SG/OPENSEARCH/LAMBDA/DMS/REDSHIFT"
-        exit 1
-      fi
-  when: manual
-  allow_failure: false
-  only:
-    refs:
-      - aws-resource-audit
-  tags: 
-    - dds-server-sre-metric-reports
+import boto3
+import csv
+import os,sys
+import glob
+from configparser import ConfigParser
+#reading command line arguments when running resource_report.py
+ar_lst = list(sys.argv)
+#read the list of all the environment variable
+home_path=os.environ.get("HOME")
+list_env = ar_lst[1]
+list_region = ['us-east-1','us-west-2']
+for env_name in list_env.split(','):
+    print(env_name)
+    prop_file = f"./ENV/{env_name}-config.properties"
+    print(prop_file)
+    config = ConfigParser()
+    config.read(prop_file)
+    aws_profile = config.get("Profile","AWS_PROFILE")
+    print(aws_profile)
+    Tagged_EC2_List = f"./{env_name}-Tagged_EC2_List.csv"
+    UnTagged_EC2_List = f"./{env_name}-UnTagged_EC2_List.csv"
+    with open(Tagged_EC2_List, 'w', newline='') as file:
+            writer = csv.writer(file)
+            field = ["EVIRONMENT","REGION","INSTANCE ID","TAGCOUNT","REFER SPECIFIC TAG DETAILS"]
+            writer.writerow(field)
+    with open(UnTagged_EC2_List, 'w', newline='') as file:
+            writer = csv.writer(file)
+            field = ["EVIRONMENT","REGION","INSTANCE ID","TAGCOUNT","REFER SPECIFIC TAG DETAILS"]
+            writer.writerow(field)
+    session = boto3.Session(profile_name=aws_profile)
+    for region in list_region:
+        print(region)
+        ec2 = session.resource('ec2',region_name=region)
+        allowedKeyvalueTags = ['Name','Component','Owner','Env','SRE-Compliance']              
+        instances = ec2.instances.filter(Filters=[{'Name': 'instance-state-name', 'Values': ['running']}])
+        # print(instances)
+        for instance in instances:
+            numtagkey=0
+            for tagskey in allowedKeyvalueTags:
+                for tags in instance.tags:    
+                    if tags['Key'].strip() == tagskey:
+                        numtagkey+=1    
+            # print(numtagkey)
+            if numtagkey == 5:
+                # print('tagscount',numtagkey, 'with specific tag',instance.id, ' tags= ',instance.tags)
+                with open(Tagged_EC2_List, 'a', newline='') as file:
+                    writer = csv.writer(file)
+                    row_list = [[env_name,region,instance.id,numtagkey,instance.tags]]
+                    writer.writerows(row_list)
+            else:
+                # print('tagscount',numtagkey,'without specific tags',instance.id,' tags= ',instance.tags)
+                with open(UnTagged_EC2_List, 'a', newline='') as file:
+                    writer = csv.writer(file)
+                    row_list = [[env_name,region,instance.id,numtagkey,instance.tags]]
+                    writer.writerows(row_list)
+audit_reports_path = f"./*.csv"
+BUCKET_NAME = 'devopssit-misc-artifacts'
+FOLDER_NAME = 'weekly-metrics-reports/'
+session = boto3.Session(profile_name='nsl-devopssit')
+s3 = session.client('s3')
+report_files = glob.glob(audit_reports_path)
+for filename in report_files:
+    key = "%s/%s" % (FOLDER_NAME, os.path.basename(filename))
+    print("Putting %s as %s" % (filename,key))
+    s3.upload_file(filename, BUCKET_NAME,key)
+print("All_Done")

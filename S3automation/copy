@@ -1,13 +1,52 @@
-ERROR! We were unable to read either as JSON nor YAML, these are the errors we got from each:
-JSON: Expecting value: line 1 column 1 (char 0)
-Syntax Error while loading YAML.
-  did not find expected key
-The error appears to be in '/home/gitlab-runner/builds/Wtc2G1gT4/0/hmno-devops/weekly-audit/ansible/SendReportsMail.yaml': line 31, column 9, but may
-be elsewhere in the file depending on the exact syntax problem.
-The offending line appears to be:
-          Attached is the audit reports zip file.
-        args:
-        ^ here
+TASK [Zip reports] *************************************************************
+task path: /home/gitlab-runner/builds/Wtc2G1gT4/0/hmno-devops/weekly-audit/ansible/SendReportsMail.yaml:15
+<127.0.0.1> ESTABLISH LOCAL CONNECTION FOR USER: gitlab-runner
+<127.0.0.1> EXEC /bin/sh -c 'echo ~gitlab-runner && sleep 0'
+<127.0.0.1> EXEC /bin/sh -c '( umask 77 && mkdir -p "` echo /home/gitlab-runner/.ansible/tmp `"&& mkdir "` echo /home/gitlab-runner/.ansible/tmp/ansible-tmp-1701260520.1298537-31799-115792977073543 `" && echo ansible-tmp-1701260520.1298537-31799-115792977073543="` echo /home/gitlab-runner/.ansible/tmp/ansible-tmp-1701260520.1298537-31799-115792977073543 `" ) && sleep 0'
+Using module file /usr/local/lib/python3.7/site-packages/ansible/modules/command.py
+<127.0.0.1> PUT /home/gitlab-runner/.ansible/tmp/ansible-local-31728890ddm0n/tmpozywkixv TO /home/gitlab-runner/.ansible/tmp/ansible-tmp-1701260520.1298537-31799-115792977073543/AnsiballZ_command.py
+<127.0.0.1> EXEC /bin/sh -c 'chmod u+x /home/gitlab-runner/.ansible/tmp/ansible-tmp-1701260520.1298537-31799-115792977073543/ /home/gitlab-runner/.ansible/tmp/ansible-tmp-1701260520.1298537-31799-115792977073543/AnsiballZ_command.py && sleep 0'
+<127.0.0.1> EXEC /bin/sh -c '/bin/python3 /home/gitlab-runner/.ansible/tmp/ansible-tmp-1701260520.1298537-31799-115792977073543/AnsiballZ_command.py && sleep 0'
+<127.0.0.1> EXEC /bin/sh -c 'rm -f -r /home/gitlab-runner/.ansible/tmp/ansible-tmp-1701260520.1298537-31799-115792977073543/ > /dev/null 2>&1 && sleep 0'
+fatal: [localhost]: FAILED! => {
+    "changed": true,
+    "cmd": [
+        "zip",
+        "-j",
+        "/home/gitlab-runner/builds/Wtc2G1gT4/0/hmno-devops/weekly-audit/auditreports.zip",
+        "/home/gitlab-runner/builds/Wtc2G1gT4/0/hmno-devops/weekly-audit/*.csv"
+    ],
+    "delta": "0:00:00.006455",
+    "end": "2023-11-29 12:22:00.406258",
+    "invocation": {
+        "module_args": {
+            "_raw_params": "zip -j /home/gitlab-runner/builds/Wtc2G1gT4/0/hmno-devops/weekly-audit/auditreports.zip /home/gitlab-runner/builds/Wtc2G1gT4/0/hmno-devops/weekly-audit/*.csv",
+            "_uses_shell": false,
+            "argv": null,
+            "chdir": null,
+            "creates": null,
+            "executable": null,
+            "removes": null,
+            "stdin": null,
+            "stdin_add_newline": true,
+            "strip_empty_ends": true,
+            "warn": false
+        }
+    },
+    "msg": "non-zero return code",
+    "rc": 12,
+    "start": "2023-11-29 12:22:00.399803",
+    "stderr": "",
+    "stderr_lines": [],
+    "stdout": "\tzip warning: name not matched: /home/gitlab-runner/builds/Wtc2G1gT4/0/hmno-devops/weekly-audit/*.csv\n\nzip error: Nothing to do! (/home/gitlab-runner/builds/Wtc2G1gT4/0/hmno-devops/weekly-audit/auditreports.zip)",
+    "stdout_lines": [
+        "\tzip warning: name not matched: /home/gitlab-runner/builds/Wtc2G1gT4/0/hmno-devops/weekly-audit/*.csv",
+        "",
+        "zip error: Nothing to do! (/home/gitlab-runner/builds/Wtc2G1gT4/0/hmno-devops/weekly-audit/auditreports.zip)"
+    ]
+}
+PLAY RECAP *********************************************************************
+localhost                  : ok=3    changed=1    unreachable=0    failed=1    skipped=0    rescued=0    ignored=0   
 Cleaning up project directory and file based variables
 00:00
 ERROR: Job failed: exit status 1

@@ -1,28 +1,28 @@
----
-- name: Send email with S3 URL and weekly metrics reports link
-  hosts: localhost
-  # vars_files:
-  #   - ../config/mailNotification-config.yaml
-  tasks:
-    - name: Get today's date
-      command: date +'%d-%m-%Y'
-      register: today_date
+variables:
+  env:
+    value: "sit"
+    description: "Enter the environment name: apollo-ne-hotfix/apollo-ne-hotfixdr/preprod/preproddr/uat/sit"
+stages:
+    - weekly-reports
+    - notify
+JOB - sre-weekly-metrics-reports:
+  stage: weekly-reports
+  script:
+    - |
+      set +x    
+      cd ${CI_PROJECT_DIR}/
+      python3 weekly-audit.py "$env"
+      
+  when: manual
+  tags: 
+    - mda-dd-server-sre-automation
+JOB - NOTIFY - Send mail notification:
+  stage: notify
+  script:
+    - |
+      set +x
+      ansible-playbook -vvv ${CI_PROJECT_DIR}/ansible/SendReportsMail.yaml 
+  when: on_success
+  tags: 
+    - mda-dd-server-sre-automation
 
-    - name: Create S3 URL
-      set_fact:
-        s3_url: "https://devopssit-misc-artifacts.s3.amazonaws.com/weekly-metrics-reports/{{ today_date.stdout }}/"
-
-    - name: Send email
-      mail:
-         host: "mailrelay-prod.meta.spectrum.net"
-         from: "Mobile2.0-DevOps <Mobile2.0-DevOps@charter.com>"
-         to: "C-Venugopal.Velagani@charter.com,C-Akriti.Babbar@charter.com,C-Purushotham.Tumuluri@charter.com,C-Sanket.Kurane@charter.com"
-         subject: "Weekly Metrics Reports for NSL/NE for EKS, RDS and API gateway health checks"
-         body: |
-          Hi ALl,
-          Please find the Weekly Metrics Reports for NSL/NE for EKS, RDS and API gateway health checks:
-          {{ s3_url }}
-          
-          Thanks,
-          MDA-SRE Team.
-      delegate_to: localhost

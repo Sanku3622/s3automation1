@@ -1,66 +1,28 @@
-import boto3
-import csv
-import os,sys
-import glob
-from configparser import ConfigParser
-#reading command line arguments when running resource_report.py
-ar_lst = list(sys.argv)
-#read the list of all the environment variable
-home_path=os.environ.get("HOME")
-list_env = ar_lst[1]
-list_region = ['us-east-1','us-west-2']
-for env_name in list_env.split(','):
-    print(env_name)
-    prop_file = f"./ENV/{env_name}-config.properties"
-    print(prop_file)
-    config = ConfigParser()
-    config.read(prop_file)
-    aws_profile = config.get("Profile","AWS_PROFILE")
-    print(aws_profile)
-    Tagged_EC2_List = f"./{env_name}-Tagged_EC2_List.csv"
-    UnTagged_EC2_List = f"./{env_name}-UnTagged_EC2_List.csv"
-    with open(Tagged_EC2_List, 'w', newline='') as file:
-            writer = csv.writer(file)
-            field = ["EVIRONMENT","REGION","INSTANCE ID","TAGCOUNT","REFER SPECIFIC TAG DETAILS"]
-            writer.writerow(field)
-    with open(UnTagged_EC2_List, 'w', newline='') as file:
-            writer = csv.writer(file)
-            field = ["EVIRONMENT","REGION","INSTANCE ID","TAGCOUNT","REFER SPECIFIC TAG DETAILS"]
-            writer.writerow(field)
-    session = boto3.Session(profile_name=aws_profile)
-    for region in list_region:
-        print(region)
-        ec2 = session.resource('ec2',region_name=region)
-        allowedKeyvalueTags = ['Name','Component','Owner','Env','SRE-Compliance']              
-        instances = ec2.instances.filter(Filters=[{'Name': 'instance-state-name', 'Values': ['running']}])
-        # print(instances)
-        for instance in instances:
-            numtagkey=0
-            for tagskey in allowedKeyvalueTags:
-                for tags in instance.tags:    
-                    if tags['Key'].strip() == tagskey:
-                        numtagkey+=1    
-            # print(numtagkey)
-            if numtagkey == 5:
-                # print('tagscount',numtagkey, 'with specific tag',instance.id, ' tags= ',instance.tags)
-                with open(Tagged_EC2_List, 'a', newline='') as file:
-                    writer = csv.writer(file)
-                    row_list = [[env_name,region,instance.id,numtagkey,instance.tags]]
-                    writer.writerows(row_list)
-            else:
-                # print('tagscount',numtagkey,'without specific tags',instance.id,' tags= ',instance.tags)
-                with open(UnTagged_EC2_List, 'a', newline='') as file:
-                    writer = csv.writer(file)
-                    row_list = [[env_name,region,instance.id,numtagkey,instance.tags]]
-                    writer.writerows(row_list)
-audit_reports_path = f"./*.csv"
-BUCKET_NAME = 'devopssit-misc-artifacts'
-FOLDER_NAME = 'weekly-metrics-reports/'
-session = boto3.Session(profile_name='nsl-devopssit')
-s3 = session.client('s3')
-report_files = glob.glob(audit_reports_path)
-for filename in report_files:
-    key = "%s/%s" % (FOLDER_NAME, os.path.basename(filename))
-    print("Putting %s as %s" % (filename,key))
-    s3.upload_file(filename, BUCKET_NAME,key)
-print("All_Done")
+---
+- name: Send email with S3 URL and weekly metrics reports link
+  hosts: localhost
+  # vars_files:
+  #   - ../config/mailNotification-config.yaml
+  tasks:
+    - name: Get today's date
+      command: date +'%d-%m-%Y'
+      register: today_date
+
+    - name: Create S3 URL
+      set_fact:
+        s3_url: "https://devopssit-misc-artifacts.s3.amazonaws.com/weekly-metrics-reports/{{ today_date.stdout }}/"
+
+    - name: Send email
+      mail:
+         host: "mailrelay-prod.meta.spectrum.net"
+         from: "Mobile2.0-DevOps <Mobile2.0-DevOps@charter.com>"
+         to: "C-Venugopal.Velagani@charter.com,C-Akriti.Babbar@charter.com,C-Purushotham.Tumuluri@charter.com,C-Sanket.Kurane@charter.com"
+         subject: "Weekly Metrics Reports for NSL/NE for EKS, RDS and API gateway health checks"
+         body: |
+          Hi ALl,
+          Please find the Weekly Metrics Reports for NSL/NE for EKS, RDS and API gateway health checks:
+          {{ s3_url }}
+          
+          Thanks,
+          MDA-SRE Team.
+      delegate_to: localhost

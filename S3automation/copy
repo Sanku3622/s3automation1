@@ -1,28 +1,13 @@
-variables:
-  env:
-    value: "sit"
-    description: "Enter the environment name: apollo-ne-hotfix/apollo-ne-hotfixdr/preprod/preproddr/uat/sit"
-stages:
-    - weekly-reports
-    - notify
-JOB - sre-weekly-metrics-reports:
-  stage: weekly-reports
-  script:
-    - |
-      set +x    
-      cd ${CI_PROJECT_DIR}/
-      python3 weekly-audit.py "$env"
-      
-  when: manual
-  tags: 
-    - mda-dd-server-sre-automation
-JOB - NOTIFY - Send mail notification:
-  stage: notify
-  script:
-    - |
-      set +x
-      ansible-playbook -vvv ${CI_PROJECT_DIR}/ansible/SendReportsMail.yaml 
-  when: on_success
-  tags: 
-    - mda-dd-server-sre-automation
-
+ERROR! We were unable to read either as JSON nor YAML, these are the errors we got from each:
+JSON: Expecting value: line 1 column 1 (char 0)
+Syntax Error while loading YAML.
+  did not find expected key
+The error appears to be in '/home/gitlab-runner/builds/Wtc2G1gT4/0/hmno-devops/weekly-audit/ansible/SendReportsMail.yaml': line 31, column 9, but may
+be elsewhere in the file depending on the exact syntax problem.
+The offending line appears to be:
+          Attached is the audit reports zip file.
+        args:
+        ^ here
+Cleaning up project directory and file based variables
+00:00
+ERROR: Job failed: exit status 1

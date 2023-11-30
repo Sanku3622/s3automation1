@@ -1,1 +1,38 @@
- "msg": "Unsupported parameters for (mail) module: attachments. Supported parameters include: username, charset, secure, subtype, ehlohost, timeout, to (recipients), headers, password, port, bcc, body, sender (from), cc, attach, host, subject (msg)."
+---
+- name: Send email with S3 URL, weekly metrics reports link, and attached CSV files
+  hosts: localhost
+  tasks:
+    - name: Get today's date
+      command: date +'%d-%m-%Y'
+      register: today_date
+ 
+#    - name: Create S3 URL
+#      set_fact:
+#      s3_url: "https://devopssit-misc-artifacts.s3.amazonaws.com/audit-{{ today_date.stdout }}/"
+# 
+    - name: Archive CSV files
+      archive:
+        path: /tmp/audit-reports
+        dest: "/tmp/audit-reports/aws-audit-reports_{{ today_date.stdout }}.zip"
+      delegate_to: localhost
+ 
+    - name: Send email
+      mail:
+        host: "mailrelay-prod.meta.spectrum.net"
+        from: "Mobile2.0-DevOps <Mobile2.0-DevOps@charter.com>"
+        to:   "C-Sanket.Kurane@charter.com,C-Venugopal.Velagani@charter.com"
+        subject: "Weekly Metrics Reports for NSL/NE for EKS, RDS, and API gateway health checks"
+        body: |
+          
+         Hi All,
+#          Please find the Weekly Metrics Reports for NSL/NE for EKS, RDS, and API gateway health checks:
+#          {{ s3_url }}
+          
+#          Attached are the CSV files.
+          
+         Thanks,
+         MDA-SRE Team.
+
+        attach:
+          - "/tmp/audit-reports/aws-audit-reports_{{ today_date.stdout }}.zip"
+      delegate_to: localhost

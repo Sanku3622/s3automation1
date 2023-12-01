@@ -1,2 +1,39 @@
-"msg": "Failed to send community.general.mail: can't attach file /tmp/audit-reports/aws-audit-reports_30-11-2023.zip: [Errno 2] No such file or directory: '/tmp/audit-reports/aws-audit-reports_30-11-2023.zip'",
-    "rc": 1
+---
+- name: Send email with S3 URL, weekly metrics reports link, and attached CSV files
+  hosts: localhost
+  tasks:
+    - name: Get today's date
+      command: date +'%d-%m-%Y'
+      register: today_date
+ 
+    - name: Ensure /tmp/audit-reports directory exists
+      ansible.builtin.file:
+        path: /tmp/audit-reports
+        state: directory
+      delegate_to: localhost
+ 
+    - name: Archive CSV files
+      ansible.builtin.shell:
+        cmd: "cd /tmp/audit-reports && zip -j aws-audit-reports_{{ today_date.stdout }}.zip *"
+      delegate_to: localhost
+
+    - name: Send email
+      mail:
+        host: "mailrelay-prod.meta.spectrum.net"
+        from: "Mobile2.0-DevOps <Mobile2.0-DevOps@charter.com>"
+        to:   "C-Akriti.Babbar@charter.com,C-Sanket.Kurane@charter.com,C-Venugopal.Velagani@charter.com"
+        subject: "All AWS Resource audit reports"
+        body: |
+          
+#         Hi All,
+#          Please find the Weekly Metrics Reports for NSL/NE for EKS, RDS, and API gateway health checks:
+#          {{ s3_url }}
+          
+#          Attached are the CSV files.
+          
+#         Thanks,
+#         MDA-SRE Team.
+
+        attach:
+          - "/tmp/audit-reports/aws-audit-reports_{{ today_date.stdout }}.zip"
+      delegate_to: localhost

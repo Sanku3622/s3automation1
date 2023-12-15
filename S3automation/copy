@@ -1,45 +1,19 @@
----
-- name: Send email with S3 URL and weekly metrics reports link
-  hosts: localhost
-  
-  tasks:
-    - name: Get today's date
-      command: date +'%d-%m-%Y'
-      register: today_date
-
-    - name: Create S3 URL
-      set_fact:
-        s3_url: "https://devopssit-misc-artifacts.s3.amazonaws.com/weekly-metrics-reports/{{ today_date.stdout }}/"
-
-    - name: Ensure /tmp/audit-reports directory exists
-      ansible.builtin.file:
-        path: /tmp/audit-reports
-        state: directory
-      delegate_to: localhost
-
-    - name: Archive Env folders
-      ansible.builtin.shell:
-        cmd: "cd /tmp/audit-reports && zip -r aws-audit-reports_{{ today_date.stdout }}.zip *.xlsx"
-      delegate_to: localhost
-
-    
-    - name: Send email
-      mail:
-         host: "mailrelay-prod.meta.spectrum.net"
-         from: "Mobile2.0-DevOps <Mobile2.0-DevOps@charter.com>"
-         to: "C-Venugopal.Velagani@charter.com,C-Akriti.Babbar@charter.com,C-Sanket.Kurane@charter.com"
-         subject: "Audit reports of AWS resources - All environments"
-         body: "Hello All,
-         <br> <br> We have completed the Audit on AWS resources.
-         <br> <br> PFA the reports and link for the reports on S3 bucket ({{ s3_url }})
-         <br> <br> Thanks, <br> MDA - System Team"
-         
-         attach:
-         - "/tmp/audit-reports/aws-audit-reports_{{ today_date.stdout }}.zip"
-
-         charset: utf8
-         subtype: html
-         secure: try
-     
-         
-      delegate_to: localhost
+**** Starting oracle sql queries execution ****
+HIS_TRANSACTION_HISTORY_BKP = <proxy> ::= <proxyuser>[<username>][/<password>][@<connect_identifier>]
+**** Execution done, checking for error ****
+Oracle script executed successfully
+**** Starting Redshift sql queries execution ****
+HIS_TRANSACTION_HISTORY_BKP = 132932
+**** Execution done, checking for error ****
+Redshift script executed successfully
+Comparing generated files for validation
+Traceback (most recent call last):
+  File "db_utilities.py", line 308, in <module>
+    compareFiles()
+  File "db_utilities.py", line 150, in compareFiles
+    key, value = line.split('=')
+ValueError: too many values to unpack (expected 2)
+something went wrong in script execution
+non_matching_keys: 
+Validation failed
+job_status: FAILED

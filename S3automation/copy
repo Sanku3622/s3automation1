@@ -1,19 +1,165 @@
-**** Starting oracle sql queries execution ****
-HIS_TRANSACTION_HISTORY_BKP = <proxy> ::= <proxyuser>[<username>][/<password>][@<connect_identifier>]
-**** Execution done, checking for error ****
-Oracle script executed successfully
-**** Starting Redshift sql queries execution ****
-HIS_TRANSACTION_HISTORY_BKP = 132932
-**** Execution done, checking for error ****
-Redshift script executed successfully
-Comparing generated files for validation
-Traceback (most recent call last):
-  File "db_utilities.py", line 308, in <module>
-    compareFiles()
-  File "db_utilities.py", line 150, in compareFiles
-    key, value = line.split('=')
-ValueError: too many values to unpack (expected 2)
-something went wrong in script execution
-non_matching_keys: 
-Validation failed
-job_status: FAILED
+def checkCountOracle():
+    #file containing the queries
+    query_file = sys.argv[2]
+
+    # Define the connection string
+    connection_string = sys.argv[3]
+
+    # Read the SQL queries from the file
+    with open(query_file, 'r') as file:
+        queries = file.read()
+
+    # Split the queries into separate statements
+    query_statements = queries.split(';')
+
+    # Regular expression pattern to extract the table name
+    table_name_pattern = r'FROM\s+[\w\.]+\.(?P<table_name>[\w_]+)'
+
+    # Execute each query one by one
+    modified_output = ''
+    for statement in query_statements:
+        # Skip empty statements
+        if not statement.strip():
+            continue
+            
+        #appending a semicolon to the statement
+        statement = statement.strip() + ';'
+        
+        # Execute sqlplus with the connection string and the current statement as input
+        proc = subprocess.Popen(['sqlplus', '-S', connection_string], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+        output, error = proc.communicate(input=statement)
+        
+
+        # Split the output into lines
+        lines = output.strip().split('\n')
+
+        # Get the table name from the current statement using regular expression
+        table_name_match = re.search(table_name_pattern, statement, re.IGNORECASE)
+        if table_name_match:
+            table_name = table_name_match.group(1)
+        else:
+            table_name = 'Unknown'
+
+        # Get the result from the last line of the output (excluding the "count(*)" line)
+        result = lines[-1].strip() if lines else 'No result'
+        if "ORA-" in result:
+            result = "ERROR:" + result.strip()
+
+        # Append the table name, query, and result to the modified output  
+        modified_output += f'{table_name} = {result}\n'
+
+    # Close the subprocess and release resources
+    proc.stdin.close()
+    proc.stdout.close()
+    proc.stderr.close()
+    proc.wait()
+    
+    # Print or process the modified output as needed
+    print(modified_output)
+
+def checkCountRedshift():
+    #file containing the queries
+    query_file = sys.argv[2]
+
+    # Define the connection parameters for Redshift
+    host = sys.argv[3]
+    port = sys.argv[4]
+    database = sys.argv[5]
+    user = sys.argv[6]
+    password = sys.argv[7]
+
+    # Read the SQL queries from the file
+    with open(query_file, 'r') as file:
+       queries = file.read()
+
+    # Split the queries into separate statements
+    query_statements = queries.split(';')
+
+    # Regular expression pattern to extract the table name
+    table_name_pattern = r'FROM\s+[\w\.]+\.([\w_]+)'
+
+    # Create a connection to Redshift
+    conn = psycopg2.connect(
+        host=host,
+        port=port,
+        database=database,
+        user=user,
+        password=password
+    )
+
+    # Create a cursor object to execute queries
+    cursor = conn.cursor()
+
+    # Execute each query one by one
+    modified_output = ''
+    for statement in query_statements:
+        # Skip empty statements
+        if not statement.strip():
+            continue
+
+        # Execute the current statement
+        cursor.execute(statement)
+
+        # Fetch the result from the executed statement
+        result = cursor.fetchone()[0]
+
+        # Get the table name from the current statement using regular expression
+        table_name_match = re.search(table_name_pattern, statement, re.IGNORECASE)
+        if table_name_match:
+            table_name = table_name_match.group(1)
+        else:
+            table_name = 'Unknown'
+
+        # Append the table_name and result to the modified output
+        modified_output += f'{table_name} = {result}\n'
+
+    # Commit the transaction and close the connection
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+    # Print or process the modified output as needed
+    print(modified_output)
+
+def compareFiles():
+    
+    file1 = sys.argv[2]
+    file2 = sys.argv[3]
+
+    matching_keys = []
+    non_matching_keys = []
+    
+    with open(file1,'r') as file1:
+        content1 = file1.readlines()
+        
+        
+    with open(file2,'r') as file2:
+        content2 = file2.readlines()
+    
+    dict1 = {}
+    for line in content1:
+        line = line.strip()
+        if  '=' in line:
+            key, value = line.split('=')
+            dict1[key.strip()] = value.strip()
+        
+    dict2 = {}
+    for line in content2:
+        line = line.strip()
+        if  '=' in line:
+            key, value = line.split('=')
+            dict2[key.strip()] = value.strip()
+            
+    for key in dict2:        
+        if key in dict1:        
+            if dict1[key] == dict2[key]:    
+                matching_keys.append(key)
+            else:
+                non_matching_keys.append(key)        
+        else:    
+            non_matching_keys.append(key)
+            
+    matching_keys_list = ','.join(matching_keys)
+    non_matching_keys_list = ','.join(non_matching_keys)
+
+    print(matching_keys_list+ "|" +non_matching_keys_list)

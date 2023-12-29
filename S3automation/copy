@@ -1,165 +1,47 @@
-def checkCountOracle():
-    #file containing the queries
-    query_file = sys.argv[2]
+---
+- name: Send email with S3 URL and weekly metrics reports link
+  hosts: localhost
+  
+  tasks:
+    - name: Get today's date
+      command: date +'%d-%m-%Y'
+      register: today_date
 
-    # Define the connection string
-    connection_string = sys.argv[3]
+    - name: Create S3 URL
+      set_fact:
+        s3_url: "https://devopssit-misc-artifacts.s3.amazonaws.com/audit-{{ today_date.stdout }}/"
 
-    # Read the SQL queries from the file
-    with open(query_file, 'r') as file:
-        queries = file.read()
+    - name: Ensure /tmp/audit-reports directory exists
+      ansible.builtin.file:
+        path: /tmp/audit-reports
+        state: directory
+      delegate_to: localhost
 
-    # Split the queries into separate statements
-    query_statements = queries.split(';')
+    - name: Archive Env folders
+      ansible.builtin.shell:
+        cmd: "cd /tmp/audit-reports/audit-reports_{{ today_date.stdout }}/ && zip -r audit-reports_{{ today_date.stdout }}.zip *.xlsx"
+      delegate_to: localhost
 
-    # Regular expression pattern to extract the table name
-    table_name_pattern = r'FROM\s+[\w\.]+\.(?P<table_name>[\w_]+)'
-
-    # Execute each query one by one
-    modified_output = ''
-    for statement in query_statements:
-        # Skip empty statements
-        if not statement.strip():
-            continue
-            
-        #appending a semicolon to the statement
-        statement = statement.strip() + ';'
-        
-        # Execute sqlplus with the connection string and the current statement as input
-        proc = subprocess.Popen(['sqlplus', '-S', connection_string], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
-        output, error = proc.communicate(input=statement)
-        
-
-        # Split the output into lines
-        lines = output.strip().split('\n')
-
-        # Get the table name from the current statement using regular expression
-        table_name_match = re.search(table_name_pattern, statement, re.IGNORECASE)
-        if table_name_match:
-            table_name = table_name_match.group(1)
-        else:
-            table_name = 'Unknown'
-
-        # Get the result from the last line of the output (excluding the "count(*)" line)
-        result = lines[-1].strip() if lines else 'No result'
-        if "ORA-" in result:
-            result = "ERROR:" + result.strip()
-
-        # Append the table name, query, and result to the modified output  
-        modified_output += f'{table_name} = {result}\n'
-
-    # Close the subprocess and release resources
-    proc.stdin.close()
-    proc.stdout.close()
-    proc.stderr.close()
-    proc.wait()
     
-    # Print or process the modified output as needed
-    print(modified_output)
+    - name: Send email
+      mail:
+         host: "mailrelay-prod.meta.spectrum.net"
+         from: "Mobile2.0-DevOps <Mobile2.0-DevOps@charter.com>"
+         to: "C-Venugopal.Velagani@charter.com,C-Akriti.Babbar@charter.com,C-Sanket.Kurane@charter.com,C-Purushotham.Tumuluri@charter.com,YashwanthKumar.Nimmala@charter.com,"
+         subject: "Audit reports of AWS resources - All environments"
+         body: "Hello All,
+         <br> <br> We have completed the Audit on AWS resources.
+         <br> <br> PFA the reports and link for the reports on S3 bucket (<a href='{{ s3_url }}'>{{ s3_url }}</a>)
+         <br> <br> Thanks, <br> MDA - System Team"
+         
+         attach:
+         - "/tmp/audit-reports/audit-reports_{{ today_date.stdout }}/audit-reports_{{ today_date.stdout }}.zip"
 
-def checkCountRedshift():
-    #file containing the queries
-    query_file = sys.argv[2]
+         charset: utf8
+         subtype: html
+         secure: try
+     
+         
+      delegate_to: localhost
+      
 
-    # Define the connection parameters for Redshift
-    host = sys.argv[3]
-    port = sys.argv[4]
-    database = sys.argv[5]
-    user = sys.argv[6]
-    password = sys.argv[7]
-
-    # Read the SQL queries from the file
-    with open(query_file, 'r') as file:
-       queries = file.read()
-
-    # Split the queries into separate statements
-    query_statements = queries.split(';')
-
-    # Regular expression pattern to extract the table name
-    table_name_pattern = r'FROM\s+[\w\.]+\.([\w_]+)'
-
-    # Create a connection to Redshift
-    conn = psycopg2.connect(
-        host=host,
-        port=port,
-        database=database,
-        user=user,
-        password=password
-    )
-
-    # Create a cursor object to execute queries
-    cursor = conn.cursor()
-
-    # Execute each query one by one
-    modified_output = ''
-    for statement in query_statements:
-        # Skip empty statements
-        if not statement.strip():
-            continue
-
-        # Execute the current statement
-        cursor.execute(statement)
-
-        # Fetch the result from the executed statement
-        result = cursor.fetchone()[0]
-
-        # Get the table name from the current statement using regular expression
-        table_name_match = re.search(table_name_pattern, statement, re.IGNORECASE)
-        if table_name_match:
-            table_name = table_name_match.group(1)
-        else:
-            table_name = 'Unknown'
-
-        # Append the table_name and result to the modified output
-        modified_output += f'{table_name} = {result}\n'
-
-    # Commit the transaction and close the connection
-    conn.commit()
-    cursor.close()
-    conn.close()
-
-    # Print or process the modified output as needed
-    print(modified_output)
-
-def compareFiles():
-    
-    file1 = sys.argv[2]
-    file2 = sys.argv[3]
-
-    matching_keys = []
-    non_matching_keys = []
-    
-    with open(file1,'r') as file1:
-        content1 = file1.readlines()
-        
-        
-    with open(file2,'r') as file2:
-        content2 = file2.readlines()
-    
-    dict1 = {}
-    for line in content1:
-        line = line.strip()
-        if  '=' in line:
-            key, value = line.split('=')
-            dict1[key.strip()] = value.strip()
-        
-    dict2 = {}
-    for line in content2:
-        line = line.strip()
-        if  '=' in line:
-            key, value = line.split('=')
-            dict2[key.strip()] = value.strip()
-            
-    for key in dict2:        
-        if key in dict1:        
-            if dict1[key] == dict2[key]:    
-                matching_keys.append(key)
-            else:
-                non_matching_keys.append(key)        
-        else:    
-            non_matching_keys.append(key)
-            
-    matching_keys_list = ','.join(matching_keys)
-    non_matching_keys_list = ','.join(non_matching_keys)
-
-    print(matching_keys_list+ "|" +non_matching_keys_list)

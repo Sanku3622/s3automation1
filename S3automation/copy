@@ -1,47 +1,220 @@
 ---
-- name: Send email with S3 URL and weekly metrics reports link
-  hosts: localhost
-  
-  tasks:
-    - name: Get today's date
-      command: date +'%d-%m-%Y'
-      register: today_date
+variables:
+  env:
+    value: "select"
+    description: Enter the environment name
+    options:
+      - "select"
+      - "sit"
+      - "uat"
+      - "preprod"
+  operation:
+    value: datamigration
+    description: Enter the operation name
+stages:
+  - startdms
+  - validaterecords
+  - cleanrecords
+  - insertrecords
 
-    - name: Create S3 URL
-      set_fact:
-        s3_url: "https://devopssit-misc-artifacts.s3.amazonaws.com/audit-{{ today_date.stdout }}/"
+workflow:
+  rules:
+    - if: $env == "sit"
+      variables:
+        RUNNER_TAG: "dd-server-mediation-sit-ue1"
+    - if: $env == "uat"
+      variables:
+        RUNNER_TAG: "dd-server-mediation-uat-ue1"
+    - if: $env == "preprod"
+      variables:
+        RUNNER_TAG: "dd-server-mediation-preprod-ue1"
 
-    - name: Ensure /tmp/audit-reports directory exists
-      ansible.builtin.file:
-        path: /tmp/audit-reports
-        state: directory
-      delegate_to: localhost
-
-    - name: Archive Env folders
-      ansible.builtin.shell:
-        cmd: "cd /tmp/audit-reports/audit-reports_{{ today_date.stdout }}/ && zip -r audit-reports_{{ today_date.stdout }}.zip *.xlsx"
-      delegate_to: localhost
-
-    
-    - name: Send email
-      mail:
-         host: "mailrelay-prod.meta.spectrum.net"
-         from: "Mobile2.0-DevOps <Mobile2.0-DevOps@charter.com>"
-         to: "C-Venugopal.Velagani@charter.com,C-Akriti.Babbar@charter.com,C-Sanket.Kurane@charter.com,C-Purushotham.Tumuluri@charter.com,YashwanthKumar.Nimmala@charter.com,"
-         subject: "Audit reports of AWS resources - All environments"
-         body: "Hello All,
-         <br> <br> We have completed the Audit on AWS resources.
-         <br> <br> PFA the reports and link for the reports on S3 bucket (<a href='{{ s3_url }}'>{{ s3_url }}</a>)
-         <br> <br> Thanks, <br> MDA - System Team"
-         
-         attach:
-         - "/tmp/audit-reports/audit-reports_{{ today_date.stdout }}/audit-reports_{{ today_date.stdout }}.zip"
-
-         charset: utf8
-         subtype: html
-         secure: try
-     
-         
-      delegate_to: localhost
+1. Start DMS Task:
+  stage: startdms
+  script:
+    - |
+      echo "ENVIRONMENT: $env"
+      echo "OPERATION: $operation"
       
+      #creating directory for result_file
+      result_folder="/tmp/automationJob/DMS/"
+      result_file="/tmp/automationJob/DMS/dms_results.txt"
+      status_file="/tmp/automationJob/DMS/task_status.txt"
+      
+      if [[ -d $result_folder ]]; then
+         echo "removing $result_folder"
+         rm -rf $result_folder
+      fi
+      
+      echo "creating results directory $result_folder"
+      mkdir -p $result_folder      
+
+      cd ${CI_PROJECT_DIR}/scripts
+      chmod +x *
+
+      ## Run migration
+      ./startDMS.sh "$result_file" "$status_file"
+          
+      job_status=$(cat $status_file)
+      echo "job_status: $job_status"
+
+      #sending email notification
+      if [[ -f "$result_file" ]]; then
+        echo "Sending email notification"
+        ansible-playbook ${CI_PROJECT_DIR}/ansible/SendMailDMS.yaml --extra-vars "ENV='${env}' EMAIL_BODY='${result_file}'"        
+      #removing result_file and status_file
+        rm -rf "$result_file" "$status_file"
+      else
+        echo "Something went wrong, skipping mail notification."
+      fi
+
+      #failing the job after the notifications if job_status is FAILED
+      if [[ "$job_status" == "FAILED" ]]; then
+         exit 1
+      fi
+
+  when: manual
+  allow_failure: false
+  only:
+    refs:
+      - dms-archival-automation
+    variables:
+      - ($operation == "datamigration" && ( $env == "sit" || $env == "uat" || $env == "preprod" ) )
+  tags:
+    -  $RUNNER_TAG
+
+
+2. Validation of Source Postgresql and Target Redshift:
+  stage: validaterecords
+  script:
+    - |
+      echo "ENVIRONMENT: $env"
+      echo "OPERATION: $operation"
+      
+      result_file="/tmp/automationJob/DMS/dms_results.txt"
+      status_file="/tmp/automationJob/DMS/task_status.txt"
+      cd ${CI_PROJECT_DIR}/scripts
+      chmod +x *
+
+      ## Validate data
+      ./validateDMS.sh "$result_file" "$status_file"
+      
+      job_status=$(cat $status_file)
+      echo "job_status: $job_status"
+
+      #sending email notification
+      if [[ -f "$result_file" ]]; then
+        echo "Sending email notification"
+        ansible-playbook ${CI_PROJECT_DIR}/ansible/SendMailDMS.yaml --extra-vars "ENV='${env}' EMAIL_BODY='${result_file}'"        
+      #removing result_file and status_file
+        rm -rf "$result_file" "$status_file"
+      else
+        echo "Something went wrong, skipping mail notification."
+      fi
+
+      #failing the job after the notifications if job_status is FAILED
+      if [[ "$job_status" == "FAILED" ]]; then
+         exit 1
+      fi
+
+  when: manual
+  needs: 
+    - job: "1. Start DMS Task"
+  allow_failure: false
+  only:
+    refs:
+      - dms-archival-automation
+    variables:
+      - ($operation == "datamigration" && ( $env == "sit" || $env == "uat" || $env == "preprod" ) )
+  tags:
+    -  $RUNNER_TAG
+
+3. Cleanup Data from Source PostgreSql RDS Schema :
+  stage: cleanrecords
+  script:
+    - |
+      echo "ENVIRONMENT: $env"
+      echo "OPERATION: $operation"
+      result_file="/tmp/automationJob/DMS/dms_results.txt"
+      status_file="/tmp/automationJob/DMS/task_status.txt"
+      cd ${CI_PROJECT_DIR}/scripts
+      chmod +x *
+      
+      ## Cleanup data
+      ./cleanDataPostgres.sh "$result_file" "$status_file"
+      
+      job_status=$(cat $status_file)
+      echo "job_status: $job_status"
+
+        #sending email notification
+      if [[ -f "$result_file" ]]; then
+        echo "Sending email notification"
+        ansible-playbook ${CI_PROJECT_DIR}/ansible/SendMailDMS.yaml --extra-vars "ENV='${env}' EMAIL_BODY='${result_file}'"        
+        #removing result_file and status_file
+        rm -rf "$result_file" "$status_file"
+      else
+        echo "Something went wrong, skipping mail notification."
+      fi
+      
+      #failing the job after the notifications if job_status is FAILED
+      if [[ "$job_status" == "FAILED" ]]; then
+         exit 1
+      fi
+
+  when: manual
+  needs:
+    - job: "2. Validation of Source Postgresql and Target Redshift"
+  allow_failure: false
+  only:
+    refs:
+      - dms-archival-automation
+    variables:
+      - ($operation == "datamigration" && ( $env == "sit" || $env == "uat" || $env == "preprod" ) )
+  tags:
+    -  $RUNNER_TAG
+
+4. Insert data from the staging schema to the target schema in Redshift:
+  stage: insertrecords
+  script:
+    - |
+      echo "ENVIRONMENT: $env"
+      echo "OPERATION: $operation"
+      
+      result_file="/tmp/automationJob/DMS/dms_results.txt"
+      status_file="/tmp/automationJob/DMS/task_status.txt"
+      cd ${CI_PROJECT_DIR}/scripts
+      chmod +x *
+      
+      ## Insert data
+      ./insertDataRedshift.sh "$result_file" "$status_file"
+      
+      job_status=$(cat $status_file)
+      echo "job_status: $job_status"
+
+        #sending email notification
+      if [[ -f "$result_file" ]]; then
+        echo "Sending email notification"
+        ansible-playbook ${CI_PROJECT_DIR}/ansible/SendMailDMS.yaml --extra-vars "ENV='${env}' EMAIL_BODY='${result_file}'"        
+        #removing result_file and status_file
+        rm -rf "$result_file" "$status_file"
+      else
+        echo "Something went wrong, skipping mail notification."
+      fi
+      
+      #failing the job after the notifications if job_status is FAILED
+      if [[ "$job_status" == "FAILED" ]]; then
+         exit 1
+      fi
+
+  when: manual
+  needs:
+    - job: "3. Cleanup Data from Source PostgreSql RDS Schema"
+  allow_failure: false
+  only:
+    refs:
+      - dms-archival-automation
+    variables:
+      - ($operation == "datamigration" && ( $env == "sit" || $env == "uat" || $env == "preprod" ) )
+  tags:
+    -  $RUNNER_TAG
 

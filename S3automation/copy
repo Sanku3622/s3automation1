@@ -83,39 +83,58 @@ for env_name in list_env.split(','):
                         row_list = [[db_instance, region,allocatedstorage_space,utilisedstorage_space]]
                         writer.writerows(row_list)
     else:
-         print("db instance is not available")                    
-#EKS cluster resource reports generation
-    for clustername in list_cluster.split(','):
-        print(clustername)
-        kube_config = home_path+"/"+clustername+"/.kube/config"
-        os.environ['KUBECONFIG'] = kube_config
-        #os.system("kubectl top pod -A | awk -v OFS=',' '{print $1, $2, $3, $4, $5}' >" +clustername + ".csv")
-        kubectl_command = ["kubectl", "top", "pods", "-A"]
-        kubectl_process = subprocess.Popen(kubectl_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        kubectl_output1, _ = kubectl_process.communicate()
-        cmd1_output = kubectl_output1.strip().split("\n")
-        cltr_data = [line.split()[:5] for line in cmd1_output]
-        cltr_report = f"{clustername}_{today}.csv"
-        # Write the data to a CSV file
-        with open(cltr_report, "w", newline='') as cltrfile:
-            csv_writer = csv.writer(cltrfile)
-            csv_writer.writerows(cltr_data)
-            print(f"CSV file '{cltr_report}' generated successfully.")
-        #get the resource count & restart count using resultant csv path
-        kubectl_command = ["kubectl", "get", "pods", "-A"]
-        kubectl_process = subprocess.Popen(kubectl_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        kubectl_output2, _ = kubectl_process.communicate()
-        cmd2_output = kubectl_output2.strip().split("\n")
-        resource_data = [line.split()[:5] for line in cmd2_output]
-        # Write the data to a CSV file
-        cltr_resource = f"resource_{clustername}_{today}.csv"
-        with open(cltr_resource, "w", newline='') as resourcefile:
-            csv_writer = csv.writer(resourcefile)
-            csv_writer.writerows(resource_data)
-            print(f"CSV file '{cltr_resource}' generated successfully.")
-        print("#############################################################################")
-        #reports = home_path+"/weekly-audit/"+cltr_resource
-        #print(reports)
+         print("db instance is not available")
+
+    # Define cltr_resource before the loop
+    cltr_resource = ""                    
+# EKS cluster resource reports generation
+for clustername in list_cluster.split(','):
+    print(clustername)
+    kube_config = home_path + "/" + clustername + "/.kube/config"
+    os.environ['KUBECONFIG'] = kube_config
+ 
+    cltr_resource = f"{clustername}_{today}.csv"  # Update cltr_resource inside the loop
+ 
+    # Execute kubectl get pods -A
+    kubectl_command_pods = ["kubectl", "get", "pods", "-A"]
+    kubectl_process_pods = subprocess.Popen(kubectl_command_pods, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    kubectl_output_pods, _ = kubectl_process_pods.communicate()
+    cmd_pods_output = kubectl_output_pods.strip().split("\n")
+    pods_data = [line.split()[:5] for line in cmd_pods_output]
+ 
+    # Write the data to the CSV file
+    with open(cltr_resource, "w", newline='') as cltrfile:
+        csv_writer = csv.writer(cltrfile)
+        csv_writer.writerows(pods_data)
+ 
+    # Execute kubectl get nodes -A
+    kubectl_command_nodes = ["kubectl", "get", "nodes", "-A"]
+    kubectl_process_nodes = subprocess.Popen(kubectl_command_nodes, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    kubectl_output_nodes, _ = kubectl_process_nodes.communicate()
+    cmd_nodes_output = kubectl_output_nodes.strip().split("\n")
+    nodes_data = [line.split()[:5] for line in cmd_nodes_output]
+ 
+    # Append the data to the existing CSV file
+    with open(cltr_resource, "a", newline='') as cltrfile:
+        csv_writer = csv.writer(cltrfile)
+        csv_writer.writerows(nodes_data)
+ 
+    # Execute kubectl get hpa -A
+    kubectl_command_hpa = ["kubectl", "get", "hpa", "-A"]
+    kubectl_process_hpa = subprocess.Popen(kubectl_command_hpa, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    kubectl_output_hpa, _ = kubectl_process_hpa.communicate()
+    cmd_hpa_output = kubectl_output_hpa.strip().split("\n")
+    hpa_data = [line.split()[:5] for line in cmd_hpa_output]
+ 
+    # Append the data to the existing CSV file
+    with open(cltr_resource, "a", newline='') as cltrfile:
+        csv_writer = csv.writer(cltrfile)
+        csv_writer.writerows(hpa_data)
+ 
+    print(f"CSV file '{cltr_resource}' generated successfully with pods, nodes, and hpa data.")
+    print("#############################################################################")
+    #reports = home_path+"/weekly-audit/"+cltr_resource
+    #print(reports)
     #csv_path = "D:/Charter-SRE/Audit-scripts/"+env_name +".csv"
         df=pd.read_csv(cltr_resource)
         restart_count=df['RESTARTS'].sum()

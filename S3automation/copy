@@ -1,220 +1,147 @@
----
-variables:
-  env:
-    value: "select"
-    description: Enter the environment name
-    options:
-      - "select"
-      - "sit"
-      - "uat"
-      - "preprod"
-  operation:
-    value: datamigration
-    description: Enter the operation name
-stages:
-  - startdms
-  - validaterecords
-  - cleanrecords
-  - insertrecords
+import pandas as pd
+import boto3
+import subprocess
+from datetime import datetime,timedelta,date
+import json,csv
+import os,sys
+import glob
+from configparser import ConfigParser
+today = date.today()
+today = today.strftime("%d-%m-%Y")
+# # reading command line arguments when running resource_report.py
+ar_lst = list(sys.argv)
+# # #read the list of all the environment variable
+# list_dbinstance = ar_lst[1]
+home_path=os.environ.get("HOME")
+eks_report = home_path+"/builds/Wtc2G1gT4/0/hmno-devops/weekly-audit/eks_report_"+today+".csv"
+with open(eks_report, 'w', newline='') as file:
+        writer = csv.writer(file)
+        field = ["EKScluster","Restart count","Resource count"]
+        writer.writerow(field)
+rds_reports = home_path+"/builds/Wtc2G1gT4/0/hmno-devops/weekly-audit/rds_report_"+today+".csv"
+with open(rds_reports, 'a', newline='') as file:
+            writer = csv.writer(file)
+            field = ["Instancename","Region","TotalStorage","Utilisedstorage"]
+            writer.writerow(field)
+list_env = ar_lst[1]
+for env_name in list_env.split(','):
+    print(env_name)
+    prop_file = f"{home_path}/builds/Wtc2G1gT4/0/hmno-devops/weekly-audit/ENV/{env_name}-config.properties"
+    print(prop_file)
+    config = ConfigParser()
+    config.read(prop_file)
+    aws_profile = config.get("Profile","AWS_PROFILE")
+    print(aws_profile)
+    list_cluster = config.get("EKS-cluster","cluster")
+    if config.has_section("db-instance"):
+       list_instance = config.get("db-instance","dbinstance")
+       print(list_instance)
+       for db_instance in list_instance.split(','):
+         print(db_instance)
+         session = boto3.Session(profile_name=aws_profile)
+         rds_client = session.client('rds')
+         response = rds_client.describe_db_instances(DBInstanceIdentifier=db_instance)
+         for instance in response['DBInstances']:
+            if instance['DBInstanceIdentifier'] == db_instance:
+              region= instance['AvailabilityZone'][:-1]
+              allocatedstorage_space = response['DBInstances'][0]['AllocatedStorage']
+              print (allocatedstorage_space)
+              cloudwatch = session.client('cloudwatch',region_name=region)
+              response = cloudwatch.get_metric_data(
+                MetricDataQueries=[
+                    {
+                        'Id': 'fetching_FreeStorageSpace',
+                        'MetricStat': {
+                            'Metric': {
+                                'Namespace': 'AWS/RDS',
+                                'MetricName': 'FreeStorageSpace',
+                                'Dimensions': [
+                                    {
+                                        "Name": "DBInstanceIdentifier",
+                                        "Value": db_instance
+                                    }
+                                ]
+                            },
+                            'Period': 604800,
+                            'Stat': 'Maximum'
+                        }
+                    }
+                ],
+                StartTime=(datetime.now() - timedelta(seconds=201600 * 3)).timestamp(),
+                EndTime=datetime.now().timestamp(),
+                ScanBy='TimestampDescending'
+            )
+            #FreeStorageSpace =response['MetricDataResults'][0]['Values'][0]
 
-workflow:
-  rules:
-    - if: $env == "sit"
-      variables:
-        RUNNER_TAG: "dd-server-mediation-sit-ue1"
-    - if: $env == "uat"
-      variables:
-        RUNNER_TAG: "dd-server-mediation-uat-ue1"
-    - if: $env == "preprod"
-      variables:
-        RUNNER_TAG: "dd-server-mediation-preprod-ue1"
-
-1. Start DMS Task:
-  stage: startdms
-  script:
-    - |
-      echo "ENVIRONMENT: $env"
-      echo "OPERATION: $operation"
-      
-      #creating directory for result_file
-      result_folder="/tmp/automationJob/DMS/"
-      result_file="/tmp/automationJob/DMS/dms_results.txt"
-      status_file="/tmp/automationJob/DMS/task_status.txt"
-      
-      if [[ -d $result_folder ]]; then
-         echo "removing $result_folder"
-         rm -rf $result_folder
-      fi
-      
-      echo "creating results directory $result_folder"
-      mkdir -p $result_folder      
-
-      cd ${CI_PROJECT_DIR}/scripts
-      chmod +x *
-
-      ## Run migration
-      ./startDMS.sh "$result_file" "$status_file"
-          
-      job_status=$(cat $status_file)
-      echo "job_status: $job_status"
-
-      #sending email notification
-      if [[ -f "$result_file" ]]; then
-        echo "Sending email notification"
-        ansible-playbook ${CI_PROJECT_DIR}/ansible/SendMailDMS.yaml --extra-vars "ENV='${env}' EMAIL_BODY='${result_file}'"        
-      #removing result_file and status_file
-        rm -rf "$result_file" "$status_file"
-      else
-        echo "Something went wrong, skipping mail notification."
-      fi
-
-      #failing the job after the notifications if job_status is FAILED
-      if [[ "$job_status" == "FAILED" ]]; then
-         exit 1
-      fi
-
-  when: manual
-  allow_failure: false
-  only:
-    refs:
-      - dms-archival-automation
-    variables:
-      - ($operation == "datamigration" && ( $env == "sit" || $env == "uat" || $env == "preprod" ) )
-  tags:
-    -  $RUNNER_TAG
-
-
-2. Validation of Source Postgresql and Target Redshift:
-  stage: validaterecords
-  script:
-    - |
-      echo "ENVIRONMENT: $env"
-      echo "OPERATION: $operation"
-      
-      result_file="/tmp/automationJob/DMS/dms_results.txt"
-      status_file="/tmp/automationJob/DMS/task_status.txt"
-      cd ${CI_PROJECT_DIR}/scripts
-      chmod +x *
-
-      ## Validate data
-      ./validateDMS.sh "$result_file" "$status_file"
-      
-      job_status=$(cat $status_file)
-      echo "job_status: $job_status"
-
-      #sending email notification
-      if [[ -f "$result_file" ]]; then
-        echo "Sending email notification"
-        ansible-playbook ${CI_PROJECT_DIR}/ansible/SendMailDMS.yaml --extra-vars "ENV='${env}' EMAIL_BODY='${result_file}'"        
-      #removing result_file and status_file
-        rm -rf "$result_file" "$status_file"
-      else
-        echo "Something went wrong, skipping mail notification."
-      fi
-
-      #failing the job after the notifications if job_status is FAILED
-      if [[ "$job_status" == "FAILED" ]]; then
-         exit 1
-      fi
-
-  when: manual
-  needs: 
-    - job: "1. Start DMS Task"
-  allow_failure: false
-  only:
-    refs:
-      - dms-archival-automation
-    variables:
-      - ($operation == "datamigration" && ( $env == "sit" || $env == "uat" || $env == "preprod" ) )
-  tags:
-    -  $RUNNER_TAG
-
-3. Cleanup Data from Source PostgreSql RDS Schema :
-  stage: cleanrecords
-  script:
-    - |
-      echo "ENVIRONMENT: $env"
-      echo "OPERATION: $operation"
-      result_file="/tmp/automationJob/DMS/dms_results.txt"
-      status_file="/tmp/automationJob/DMS/task_status.txt"
-      cd ${CI_PROJECT_DIR}/scripts
-      chmod +x *
-      
-      ## Cleanup data
-      ./cleanDataPostgres.sh "$result_file" "$status_file"
-      
-      job_status=$(cat $status_file)
-      echo "job_status: $job_status"
-
-        #sending email notification
-      if [[ -f "$result_file" ]]; then
-        echo "Sending email notification"
-        ansible-playbook ${CI_PROJECT_DIR}/ansible/SendMailDMS.yaml --extra-vars "ENV='${env}' EMAIL_BODY='${result_file}'"        
-        #removing result_file and status_file
-        rm -rf "$result_file" "$status_file"
-      else
-        echo "Something went wrong, skipping mail notification."
-      fi
-      
-      #failing the job after the notifications if job_status is FAILED
-      if [[ "$job_status" == "FAILED" ]]; then
-         exit 1
-      fi
-
-  when: manual
-  needs:
-    - job: "2. Validation of Source Postgresql and Target Redshift"
-  allow_failure: false
-  only:
-    refs:
-      - dms-archival-automation
-    variables:
-      - ($operation == "datamigration" && ( $env == "sit" || $env == "uat" || $env == "preprod" ) )
-  tags:
-    -  $RUNNER_TAG
-
-4. Insert data from the staging schema to the target schema in Redshift:
-  stage: insertrecords
-  script:
-    - |
-      echo "ENVIRONMENT: $env"
-      echo "OPERATION: $operation"
-      
-      result_file="/tmp/automationJob/DMS/dms_results.txt"
-      status_file="/tmp/automationJob/DMS/task_status.txt"
-      cd ${CI_PROJECT_DIR}/scripts
-      chmod +x *
-      
-      ## Insert data
-      ./insertDataRedshift.sh "$result_file" "$status_file"
-      
-      job_status=$(cat $status_file)
-      echo "job_status: $job_status"
-
-        #sending email notification
-      if [[ -f "$result_file" ]]; then
-        echo "Sending email notification"
-        ansible-playbook ${CI_PROJECT_DIR}/ansible/SendMailDMS.yaml --extra-vars "ENV='${env}' EMAIL_BODY='${result_file}'"        
-        #removing result_file and status_file
-        rm -rf "$result_file" "$status_file"
-      else
-        echo "Something went wrong, skipping mail notification."
-      fi
-      
-      #failing the job after the notifications if job_status is FAILED
-      if [[ "$job_status" == "FAILED" ]]; then
-         exit 1
-      fi
-
-  when: manual
-  needs:
-    - job: "3. Cleanup Data from Source PostgreSql RDS Schema"
-  allow_failure: false
-  only:
-    refs:
-      - dms-archival-automation
-    variables:
-      - ($operation == "datamigration" && ( $env == "sit" || $env == "uat" || $env == "preprod" ) )
-  tags:
-    -  $RUNNER_TAG
-
+            bytes_to_gb_lambda = lambda bytes_value : bytes_value / (1000 ** 3)
+            FreeStorageSpace = bytes_to_gb_lambda(response['MetricDataResults'][0]['Values'][0])
+            print(FreeStorageSpace)
+            utilisedstorage_space= allocatedstorage_space - FreeStorageSpace
+            print(utilisedstorage_space)
+            with open(rds_reports, 'a', newline='') as file:
+                        writer = csv.writer(file)
+                        row_list = [[db_instance, region,allocatedstorage_space,utilisedstorage_space]]
+                        writer.writerows(row_list)
+    else:
+         print("db instance is not available")                    
+#EKS cluster resource reports generation
+    for clustername in list_cluster.split(','):
+        print(clustername)
+        kube_config = home_path+"/"+clustername+"/.kube/config"
+        os.environ['KUBECONFIG'] = kube_config
+        #os.system("kubectl top pod -A | awk -v OFS=',' '{print $1, $2, $3, $4, $5}' >" +clustername + ".csv")
+        kubectl_command = ["kubectl", "top", "pods", "-A"]
+        kubectl_process = subprocess.Popen(kubectl_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        kubectl_output1, _ = kubectl_process.communicate()
+        cmd1_output = kubectl_output1.strip().split("\n")
+        cltr_data = [line.split()[:5] for line in cmd1_output]
+        cltr_report = f"{clustername}_{today}.csv"
+        # Write the data to a CSV file
+        with open(cltr_report, "w", newline='') as cltrfile:
+            csv_writer = csv.writer(cltrfile)
+            csv_writer.writerows(cltr_data)
+            print(f"CSV file '{cltr_report}' generated successfully.")
+        #get the resource count & restart count using resultant csv path
+        kubectl_command = ["kubectl", "get", "pods", "-A"]
+        kubectl_process = subprocess.Popen(kubectl_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        kubectl_output2, _ = kubectl_process.communicate()
+        cmd2_output = kubectl_output2.strip().split("\n")
+        resource_data = [line.split()[:5] for line in cmd2_output]
+        # Write the data to a CSV file
+        cltr_resource = f"resource_{clustername}_{today}.csv"
+        with open(cltr_resource, "w", newline='') as resourcefile:
+            csv_writer = csv.writer(resourcefile)
+            csv_writer.writerows(resource_data)
+            print(f"CSV file '{cltr_resource}' generated successfully.")
+        print("#############################################################################")
+        #reports = home_path+"/weekly-audit/"+cltr_resource
+        #print(reports)
+    #csv_path = "D:/Charter-SRE/Audit-scripts/"+env_name +".csv"
+        df=pd.read_csv(cltr_resource)
+        restart_count=df['RESTARTS'].sum()
+    #restart_count=df['CPU'].sum()
+        print("restart count", restart_count)
+        resource_count = len(df['NAMESPACE'])
+        print("resource count", resource_count)
+    # append env_name, resource_count, restart_count into the resource_report csv file
+        with open(eks_report, 'a', newline='') as file:
+            writer = csv.writer(file)
+            row_list = [[clustername, restart_count, resource_count]]
+            writer.writerows(row_list)
+print("upload all the csv files into s3 bucket")
+#upload the csv files into s3 bucket
+home_path=os.environ.get("HOME")
+reports_path = f"/home/gitlab-runner/builds/Wtc2G1gT4/0/hmno-devops/weekly-audit/*.csv"
+print(reports_path)
+BUCKET_NAME = 'devopssit-misc-artifacts'
+FOLDER_NAME = 'weekly-metrics-reports/'+today
+session = boto3.Session(profile_name='nsl-devopssit')
+s3 = session.client('s3')
+csv_files = glob.glob(reports_path)
+for filename in csv_files:
+    key = "%s/%s" % (FOLDER_NAME, os.path.basename(filename))
+    print("Putting %s as %s" % (filename,key))
+    s3.upload_file(filename, BUCKET_NAME,key)
+object_url="https://devopssit-misc-artifacts.s3.amazonaws.com/weekly-metrics-reports/"+today
+print(object_url)
+print("All_Done")

@@ -1,2 +1,35 @@
-utilization_percentage = ( utilisedstorage_space / allocatedstorage_space ) * 100
-            print(f"Utilization Percentage: {utilization_percentage:.2f}%")
+apiVersion: v1
+clusters:
+- cluster:
+    certificate-authority-data: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUMvakNDQWVhZ0F3SUJBZ0lCQURBTkJna3Foa2lHOXcwQkFRc0ZBREFWTVJNd0VRWURWUVFERXdwcmRXSmwKY201bGRHVnpNQjRYRFRJek1EWXlPREV4TURRek5Wb1hEVE16TURZeU5URXhNRFF6TlZvd0ZURVRNQkVHQTFVRQpBeE1LYTNWaVpYSnVaWFJsY3pDQ0FTSXdEUVlKS29aSWh2Y05BUUVCQlFBRGdnRVBBRENDQVFvQ2dnRUJBTnZLCm5mb3BNR3pZeHdvOXdFbFJHQ3FRNWV5ckZleFFWRDA4MFUrYVkzUU5PZHZkYm5teG5ONWxUU2t0R1FZYkNwWGwKZlNJWXZlQmkwSjNITEV4Ty83TGE0bm9SZjB6K3dpVnVkQXVpc01oOFM5SEpNelN4eHFFalZrZlNFWXhENTVVawo3KzF1SEZaNXV1UWJMaWpySlBVWXY2ZVgwM1FiMlN6ZlNQQktzM1FvY1RQWmUrd0g5R09LcFhiRnZqZXpDMjBOCm5HTFBPQ2lEZmVBRTJEdG5lM1A4Mit5T0hKQnJlT2ZlNXFJM1ZUY2FsYkk5amRGNHdhd3h1cUxubFE0bmlhVGEKUzdoYk1GQ1Rqam81TjVGdE5SOTZITmdUWHo2Y3JiRFdYVnlYK2NPK096OFNESmgxbU5CYi9HZEVtb1Y4bHUyMwpVUDVYNXRZWEJDZEFXU2hHZVFNQ0F3RUFBYU5aTUZjd0RnWURWUjBQQVFIL0JBUURBZ0trTUE4R0ExVWRFd0VCCi93UUZNQU1CQWY4d0hRWURWUjBPQkJZRUZPQmFSTk0ySS82ZTFmUTZGSkpXdFRiTno1Vm1NQlVHQTFVZEVRUU8KTUF5Q0NtdDFZbVZ5Ym1WMFpYTXdEUVlKS29aSWh2Y05BUUVMQlFBRGdnRUJBTlN3dXAxelVLZ3ZvdFpKMUIwdQpRazFnLzltR0I3VHZaZWR1V2dPSCswVFR2QllxczVkUkxNb2xhdnZUdWF4U3JuMWljVG1Kam9CWDBYbllFL2ovCjMwMHVwQU9RU2wyTkJmUys2bXNzNlZTV1pUdFhGU3k4YkRGZHpBOENmT25Oc3czalA5b0pqN0g3R2hDK1JQM2UKTHBkSWk0NFYwRllvZzdhQm1xQlhubzlmMG9aUnlQRjA2SjVuNmRNOGhmRGlsN3ozQllJYytyTUd5VVR5MTFPNQpHdXlwbGd0c0pHeGtvR2VpM2xQSGNPNXh1M3ZuSEhpWUtFbUFneTN0U3U3dXEySHdLcTRVQUZCZ0o4MWI3MGdsCkVYZktlR0tUN2wvbHplcXNBM2FrZkhETk1vQmhWL1JLRUhFM3lrcmx5WEFwbGR6WjdTTWpYRUVmbyt1TnZTOVkKajJvPQotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tCg==
+    server: https://A4546939031EF3F3FEA0B38BBFA41AB8.gr7.us-east-1.eks.amazonaws.com
+  name: arn:aws:eks:us-east-1:942444466772:cluster/nsl-devopssit
+contexts:
+- context:
+    cluster: arn:aws:eks:us-east-1:942444466772:cluster/nsl-devopssit
+    namespace: default
+    user: arn:aws:eks:us-east-1:942444466772:cluster/nsl-devopssit
+  name: arn:aws:eks:us-east-1:942444466772:cluster/nsl-devopssit
+current-context: arn:aws:eks:us-east-1:942444466772:cluster/nsl-devopssit
+kind: Config
+preferences: {}
+users:
+- name: arn:aws:eks:us-east-1:942444466772:cluster/nsl-devopssit
+  user:
+    exec:
+      apiVersion: client.authentication.k8s.io/v1beta1
+      args:
+      - --region
+      - us-east-1
+      - eks
+      - get-token
+      - --cluster-name
+      - nsl-devopssit
+      - --output
+      - json
+      command: aws
+      env:
+      - name: AWS_PROFILE
+        value: nsl-devopssit
+      interactiveMode: IfAvailable
+      provideClusterInfo: false
